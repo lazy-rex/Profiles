@@ -255,21 +255,40 @@ test('replay and conflicts: a key belongs to its caller; a changed request is re
   write_profiles(F.profiles)
 end)
 
-test('stop: an agent stops only the workers that it started', function()
+test('stop: any agent stops any worker; a repeated stop is safe; a pending start cannot be stopped', function()
   local src = F.source()
-  local mine_agent = alice:call('hub.spawn', {profile = 'fake_agent', placement = {session = src.session}, key = 'stop-a'})
-  local mine_acc = alice:call('hub.spawn', {profile = 'logtail', placement = {session = src.session}, key = 'stop-b'})
-  local theirs = bob:call('hub.spawn', {profile = 'logtail', placement = {session = src.session}, key = 'stop-c'})
+  local own_agent = alice:call('hub.spawn', {profile = 'fake_agent', placement = {session = src.session}, key = 'stop-a'})
+  local own_acc = alice:call('hub.spawn', {profile = 'logtail', placement = {session = src.session}, key = 'stop-b'})
+  local bobs_agent = bob:call('hub.spawn', {profile = 'fake_agent', placement = {session = src.session}, key = 'stop-c'})
+  local bobs_acc = bob:call('hub.spawn', {profile = 'logtail', placement = {session = src.session}, key = 'stop-d'})
   local v, tree = F.form(src, 'start_accessory')
   local before = F.ids(alice)
   succeeded(v:action('start', 'start', {values = start_values({dir = F.field(tree, 'dir').value})}))
-  local users = F.new_worker(alice, before)
-  expect_error(function() alice:call('hub.stop', {spawn_id = theirs.spawn_id}) end, 'did not start')
-  expect_error(function() alice:call('hub.stop', {spawn_id = users.spawn_id}) end, 'did not start')
-  alice:call('hub.stop', {spawn_id = mine_agent.spawn_id})
-  alice:call('hub.stop', {spawn_id = mine_acc.spawn_id})
-  expect(F.worker(alice, mine_agent.spawn_id)).to_be(nil)
-  expect(F.worker(alice, mine_acc.spawn_id)).to_be(nil)
-  expect(F.worker(alice, theirs.spawn_id)).to_be_truthy()
-  expect(F.worker(alice, users.spawn_id)).to_be_truthy()
+  local users_acc = F.new_worker(alice, before)
+  v, tree = F.form(src, 'start_agent')
+  before = F.ids(alice)
+  succeeded(v:action('start', 'start', {values = start_values({dir = F.field(tree, 'dir').value, profile = 'fake_agent'})}))
+  local users_agent = F.new_worker(alice, before)
+  -- The parent still names who started each worker; it no longer limits stop.
+  local cases = {{own_agent.spawn_id, 'alice'}, {own_acc.spawn_id, 'alice'}, {bobs_agent.spawn_id, 'bob'},
+    {bobs_acc.spawn_id, 'bob'}, {users_acc.spawn_id, 'user'}, {users_agent.spawn_id, 'user'}}
+  for _, c in ipairs(cases) do
+    expect(F.worker(alice, c[1]).parent, c[1]).to_be(c[2])
+    alice:call('hub.stop', {spawn_id = c[1]})
+    expect(F.worker(alice, c[1]), c[1]).to_be(nil)
+    expect(F.spawn_blocks(src.session, c[1]), c[1]).to_have_length(0)
+    alice:call('hub.stop', {spawn_id = c[1]}) -- a repeated stop succeeds and changes nothing
+  end
+  -- A pending start with an unknown outcome cannot be stopped, also by its own starter.
+  fault({point = 'spawn-create', mode = 'drop', op = 'stop-pending'})
+  local pending = bob:call('hub.spawn', {profile = 'logtail', placement = {session = src.session}, key = 'stop-pending'})
+  expect(pending.status).to_be('pending')
+  for _, who in ipairs({alice, bob}) do
+    expect_error(function() who:call('hub.stop', {spawn_id = pending.spawn_id}) end, 'cannot stop it')
+  end
+  -- Caller admission stays: a pane that is not a joined agent cannot stop a worker.
+  local stranger = agent('stranger', {join = false})
+  local target = alice:call('hub.spawn', {profile = 'logtail', placement = {session = src.session}, key = 'stop-e'})
+  expect_error(function() stranger:call('hub.stop', {spawn_id = target.spawn_id}) end, 'not a joined agent')
+  expect(F.worker(alice, target.spawn_id)).to_be_truthy()
 end)
