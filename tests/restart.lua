@@ -1,6 +1,6 @@
--- A pending start survives a hub restart (a stop and a crash), on both paths. The saved start
--- request and the hub's spawn row are durable: Check again after the restart sends the same
--- request, and a replay of the same key returns the same spawn.
+-- A pending start survives a hub restart (a stop and a crash), on both paths: the form's draft
+-- (with its reference to the saved start request) and the hub's spawn row stay, and a replay of
+-- an agent's key returns the same spawn. Check again after a restart is not tested yet (see below).
 local F = assert(loadfile(H.args.file:match('^(.*)/[^/]*$') .. '/support/fixture.lua'))()(H)
 local alice = agent('alice')
 
@@ -31,7 +31,7 @@ end
 -- with its pending start, and the hub's spawn row), and that the pending spawn still opens when
 -- its agent joins after the restart. Check again itself after a restart is not tested.
 for _, mode in ipairs({{name = 'a stop', opts = nil}, {name = 'a crash', opts = {crash = true}}}) do
-  test('a pending UI start survives ' .. mode.name .. ' of the hub: the draft, the saved request and the spawn', function()
+  test('a pending UI start survives ' .. mode.name .. ' of the hub: the draft and the spawn', function()
     local src = F.source()
     local v = F.form(src, 'start_agent')
     local key = 'restart-ui-' .. (mode.opts and 'kill' or 'term')
@@ -50,10 +50,11 @@ for _, mode in ipairs({{name = 'a stop', opts = nil}, {name = 'a crash', opts = 
     expect({list[1].spawn_id, list[1].state, list[1].parent}).to_equal({spawn.spawn_id, 'starting', 'user'})
 
     F.run({'touch', gate})
-    wait('the agent joins', function()
+    local joined = wait('the agent joins', function()
       local w = F.worker(alice, spawn.spawn_id)
-      return w and w.state ~= 'starting'
+      return w and w.state ~= 'starting' and w or nil
     end, 20)
+    expect(joined.state).to_be('running')
     F.run({'rm', gate})
     expect(F.spawn_blocks(src.session, spawn.spawn_id)).to_have_length(1)
   end)

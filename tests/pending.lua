@@ -94,10 +94,11 @@ test('a lost answer for an agent: pending until the agent joins, then Check agai
   expect(node(v:render(), 'pending')).to_be_truthy()
 
   F.run({'touch', gate})
-  wait('the agent joins', function()
+  local joined = wait('the agent joins', function()
     local w = F.worker(alice, spawn.spawn_id)
-    return w and w.state ~= 'starting'
+    return w and w.state ~= 'starting' and w or nil
   end, 20)
+  expect(joined.state).to_be('running')
   local op = succeeded(v:action('pending_actions', 'check', {item_id = 'check'}))
   expect(op.result).to_equal({close_form = true})
   wait('the form closed', function()
