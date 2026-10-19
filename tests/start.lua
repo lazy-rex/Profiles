@@ -29,6 +29,11 @@ test('a new tab: the form and hub.spawn start the same worker in the source sess
   local ui = F.new_worker(alice, before)
   expect(ui.parent).to_be('user')
   expect(store('draft/' .. v.id).rev).to_be('0')
+  -- close_form: the form's view is gone.
+  wait('the form closed', function()
+    for _, w in ipairs(views()) do if w.view_id == v.id then return nil end end
+    return true
+  end, 10)
   expect(op.effects).not_to_be('failed')
 
   before = F.ids(alice)
@@ -86,6 +91,10 @@ test('a split beside the source pane: the same on both paths', function()
     placement = {session = src.session, beside = src.block, direction = 'right'}})
   local tool = F.new_worker(alice, before)
   expect(F.same(tool)).to_equal(F.same(ui))
+  local _, view = F.blocks(src.session)
+  for _, w in ipairs(view.windows) do
+    if w.window_id == src.window then expect(w.focused_block_id).to_be(F.spawn_blocks(src.session, ui.spawn_id)[1].block_id) end
+  end
   for _, w in ipairs({ui, tool}) do
     local b = F.spawn_blocks(src.session, w.spawn_id)[1]
     expect(b.window_id).to_be(src.window)
@@ -118,6 +127,9 @@ test('a worktree choice and the profile default: the form sends the directory th
   alice:call('hub.spawn', {profile = 'fake_agent', cwd = F.wt, args = {task = 'lab1'}, placement = {session = src.session}, key = 'wt-1'})
   local tool = F.new_worker(alice, before)
   expect(F.same(ui).cwd).to_be(F.wt)
+  -- An agent profile's worker is named after the profile and its new agent number.
+  expect(ui.title).to_match('^Fake Agent %d+$')
+  expect(tool.title).to_match('^Fake Agent %d+$')
   expect({ui.profile, ui.cwd, ui.session_id}).to_equal({tool.profile, tool.cwd, tool.session_id})
   expect(F.record(ui.agent_id).task).to_be('lab1')
   expect(F.record(tool.agent_id).task).to_be('lab1')
