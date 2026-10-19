@@ -12,15 +12,31 @@ Check this repository out next to LazyRex, and add the plugin to the hub config:
 
 The plugin loads its other files from its own directory, so keep them together.
 
+## Agents
+
+Agents start profiles with the hub's own tools, `hub.profiles` and `hub.spawn`; the plugin exports
+no actions. The form fills one `hub.spawn` request, so its Start and Check again name that tool.
+The directory choices in the form are UI state: an agent sends `cwd` directly.
+
 ## Tests
 
-The tests use `../LazyRex` (the client library in `lib/` and the lab harness in `lab/`).
-Start an isolated lab server first, and never point tests at your own Rex server:
+The tests are Lua files in `tests/`. `lazyrex-hub test` runs them against the real hub, on an
+isolated lab Rex server that it starts and stops (LazyRex `docs/testing.md`). No test touches your
+own Rex server.
 
 ```sh
-../LazyRex/lab/server.sh /tmp/rexlab
-REX_SERVER=unix:///tmp/rexlab/rex.sock node tests/<name>.mjs
+cd ../LazyRex/hub && go build -o ~/bin/lazyrex-hub ./cmd/hub
+cd ../../Profiles && lazyrex-hub test
 ```
 
-- profiles-plugin.mjs (mock hub)
-- profiles-lab.mjs, profiles-directories-lab.mjs (lab)
+- contract.lua: the plugin client and the agent face.
+- start.lua: each start flow as the user (the form) and as an agent (hub.spawn); admission,
+  replay, conflicts and stop.
+- form.lua: the form's tree, its draft and the Directory field's text.
+- pending.lua: pending and failed starts (the hub's spawn-create faults).
+- restart.lua: a pending start across a hub stop and a crash.
+- errors.lua: a hub refusal ends the operation.
+- directories.lua: the directory helper (OSC 7 and Git worktrees).
+
+`tests/support/fixture.lua` is the shared lab fixture: a Git repository and worktree, a source
+pane that reports its directory, and harmless profiles. `lazyrex.json` is the test manifest.
