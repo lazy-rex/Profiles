@@ -38,6 +38,13 @@ test('a new tab: the form and hub.spawn start the same worker in the source sess
   expect(tool.parent).to_be('alice')
   expect(F.same(tool)).to_equal(F.same(ui))
   expect(F.same(ui)).to_equal({profile = 'logtail', cwd = F.sub, session_id = src.session, title = 'Log tail'})
+  -- placement.focus: the user's new tab is active and its pane has focus; an agent's tab is not.
+  local _, view = F.blocks(src.session)
+  local ui_block = F.spawn_blocks(src.session, ui.spawn_id)[1]
+  expect(view.active_window_id).to_be(ui_block.window_id)
+  for _, w in ipairs(view.windows) do
+    if w.window_id == ui_block.window_id then expect(w.focused_block_id).to_be(ui_block.block_id) end
+  end
   for _, w in ipairs({ui, tool}) do
     local blocks = F.spawn_blocks(src.session, w.spawn_id)
     expect(blocks).to_have_length(1)
