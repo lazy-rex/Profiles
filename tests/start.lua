@@ -130,6 +130,14 @@ test('a worktree choice and the profile default: the form sends the directory th
   -- An agent profile's worker is named after the profile and its new agent number.
   expect(ui.title).to_match('^Fake Agent %d+$')
   expect(tool.title).to_match('^Fake Agent %d+$')
+  -- Each agent starts in its own new tab, labeled with its worker title.
+  for _, w in ipairs({ui, tool}) do
+    local blocks = F.spawn_blocks(src.session, w.spawn_id)
+    expect(blocks).to_have_length(1)
+    expect(blocks[1].window_id).not_to_be(src.window)
+    expect(blocks[1].window_label).to_be(w.title)
+  end
+  expect(F.spawn_blocks(src.session, ui.spawn_id)[1].window_id).not_to_be(F.spawn_blocks(src.session, tool.spawn_id)[1].window_id)
   expect({ui.profile, ui.cwd, ui.session_id}).to_equal({tool.profile, tool.cwd, tool.session_id})
   expect(F.record(ui.agent_id).task).to_be('lab1')
   expect(F.record(tool.agent_id).task).to_be('lab1')

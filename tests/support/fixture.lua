@@ -103,7 +103,7 @@ return function(H)
     local list = {}
     for _, w in ipairs(view.windows or {}) do
       for _, l in ipairs(w.layers or {}) do
-        for _, b in ipairs(l.blocks or {}) do list[#list + 1] = {block_id = b.block_id, label = b.label, window_id = w.window_id} end
+        for _, b in ipairs(l.blocks or {}) do list[#list + 1] = {block_id = b.block_id, label = b.label, window_id = w.window_id, window_label = w.label} end
       end
     end
     return list, view

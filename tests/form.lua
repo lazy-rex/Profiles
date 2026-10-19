@@ -162,3 +162,22 @@ test('an explicit title reaches the worker, the same as an agent title', functio
   expect(F.same(ui)).to_equal(F.same(tool))
   expect(ui.title).to_be('Mine')
 end)
+
+-- Scope: the values that a failed pending start saves in the draft (values) come only from a
+-- transition that the real hub cannot reach (the map says why). This test seeds such a draft.
+test('a directory choice replaces only the directory in saved values (seeded draft)', function()
+  local v = F.form(src, 'start_agent')
+  local d = store('draft/' .. v.id).value
+  d.values = {dir = '/typed/text', profile = 'beta', ['arg/task'] = 'explicit', title = 'Mine', placement = 'split'}
+  write({{key = 'draft/' .. v.id, value = d}})
+  local tree = v:render()
+  local function shown(t)
+    local out = {}
+    for _, f in ipairs(node(t, 'start').fields) do out[f.id] = f.value end
+    return out
+  end
+  expect(shown(tree)).to_equal(d.values)
+  succeeded(v:action('dir_choices', 'choose', {item_id = 'tree:' .. F.wt}))
+  local after = shown(v:render())
+  expect(after).to_equal({dir = F.wt, profile = 'beta', ['arg/task'] = 'explicit', title = 'Mine', placement = 'split'})
+end)
