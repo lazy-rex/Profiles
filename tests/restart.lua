@@ -1,6 +1,6 @@
 -- A pending start survives a hub restart (a stop and a crash), on both paths: the form's draft
--- (with its reference to the saved start request) and the hub's spawn row stay, and a replay of
--- an agent's key returns the same spawn. Check again after a restart is not tested yet (see below).
+-- (with its reference to the saved start request) and the hub's spawn row stay, Check again on the
+-- same form sends the saved request, and a replay of an agent's key returns the same spawn.
 local F = assert(loadfile(H.args.file:match('^(.*)/[^/]*$') .. '/support/fixture.lua'))()(H)
 local alice = agent('alice')
 
@@ -25,13 +25,11 @@ local function workers_of(session, profile)
   return list
 end
 
--- Measured on LazyRex 045b5c7 (lab): after hub:restart the form's pane and the hub's view record
--- stay, but the test renderer does not attach again within 12 s, so no view action can run on
--- the old form. This test therefore checks the durable state that Check again reads (the draft
--- with its pending start, and the hub's spawn row), and that the pending spawn still opens when
--- its agent joins after the restart. Check again itself after a restart is not tested.
+-- After hub:restart the form's pane and the hub's view record stay, and the test renderer attaches
+-- again (LazyRex 9dc56f6). Check again then runs on the same view: it reads the draft's pending
+-- start, resolves its reference to the saved start request, and sends that request.
 for _, mode in ipairs({{name = 'a stop', opts = nil}, {name = 'a crash', opts = {crash = true}}}) do
-  test('a pending UI start survives ' .. mode.name .. ' of the hub: the draft and the spawn', function()
+  test('a pending UI start survives ' .. mode.name .. ' of the hub; Check again on the same form opens it', function()
     local src = F.source()
     local v = F.form(src, 'start_agent')
     local key = 'restart-ui-' .. (mode.opts and 'kill' or 'term')
@@ -49,6 +47,16 @@ for _, mode in ipairs({{name = 'a stop', opts = nil}, {name = 'a crash', opts = 
     expect(list).to_have_length(1)
     expect({list[1].spawn_id, list[1].state, list[1].parent}).to_equal({spawn.spawn_id, 'starting', 'user'})
 
+    -- The same form, attached again: it still shows the pending start, and Check again sends the
+    -- saved request (the same spawn, no second one).
+    local id = v.id
+    v = user:view('/forms/start-agent', nil, src.session)
+    expect(v.id).to_be(id)
+    expect(node(v:render(), 'pending')).to_be_truthy()
+    succeeded(v:action('pending_actions', 'check', {item_id = 'check'}))
+    expect(node(v:render(), 'pending')).to_be_truthy()
+    expect(workers_of(src.session, 'joiner')).to_have_length(1)
+
     F.run({'touch', gate})
     local joined = wait('the agent joins', function()
       local w = F.worker(alice, spawn.spawn_id)
@@ -56,7 +64,10 @@ for _, mode in ipairs({{name = 'a stop', opts = nil}, {name = 'a crash', opts = 
     end, 20)
     expect(joined.state).to_be('running')
     F.run({'rm', gate})
+    expect(succeeded(v:action('pending_actions', 'check', {item_id = 'check'})).result).to_equal({close_form = true})
+    expect(store('draft/' .. v.id).rev).to_be('0')
     expect(F.spawn_blocks(src.session, spawn.spawn_id)).to_have_length(1)
+    expect(F.worker(alice, spawn.spawn_id).parent).to_be('user')
   end)
 end
 
