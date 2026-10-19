@@ -315,9 +315,11 @@ local function finish(args, op_key, request, values)
     end)
   end
   if result.status == 'failed' then
-    -- The earlier spawn definitely failed: Start returns, and a new submit uses a new key.
+    -- The earlier spawn definitely failed: Start returns, and a new submit uses a new key. The
+    -- fields show the submitted values again (Check again has none: the pending start saved them).
     return change_draft(args, function(d)
       d.pending = nil
+      if values then d.values = values end
       d.error = result.error or 'The profile did not start'
     end)
   end

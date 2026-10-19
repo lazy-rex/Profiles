@@ -115,8 +115,13 @@ test('a refused create: the form shows the error and Start returns', function()
   local src = F.source()
   local v = F.form(src, 'start_accessory')
   fault({point = 'spawn-create', mode = 'refuse', op = 'profiles-start/refuse-1'})
-  succeeded(v:action('start', 'start', {values = values({title = 'Mine'})}, 'refuse-1'))
+  local submitted = values({dir = F.wt, title = 'Mine', placement = 'split'})
+  succeeded(v:action('start', 'start', {values = submitted}, 'refuse-1'))
   local tree = v:render()
+  -- A failed start keeps what the user submitted: a new render shows the submitted values.
+  local shown = {}
+  for _, f in ipairs(node(tree, 'start').fields) do shown[f.id] = f.value end
+  expect(shown).to_equal(submitted)
   expect(node(tree, 'start')).to_be_truthy()
   expect(node(tree, 'start_error').text).to_be('The last start failed: refused: injected fault: Rex refused the create')
   -- The failed spawn is listed as failed, with no pane.
