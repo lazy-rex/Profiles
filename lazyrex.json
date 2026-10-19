@@ -1,0 +1,11 @@
+{
+ "name": "profiles",
+ "main": "profiles.lua",
+ "test": {
+  "agents": [
+   {"id": "alice", "name": "Alice"},
+   {"id": "bob", "name": "Bob"}
+  ],
+  "profiles": "tests/profiles.json"
+ }
+}

@@ -22,7 +22,15 @@ local dirs = assert(loadfile(script:match('^(.*)/') .. '/profiles_directories.lu
 
 local kinds = {['/forms/start-agent'] = 'agent', ['/forms/start-accessory'] = 'accessory'}
 local draft_ttl = 24 * 3600 -- a draft whose form never ended expires after a day
-local function action(name, label) return {name = name, label = label, enabled = true} end
+-- Agent parity: each user action names its agent tool or a user_only reason. Agents start a
+-- profile with the hub's own hub.spawn; the form only fills one hub.spawn request.
+local function action(name, label, parity)
+  local a = {name = name, label = label, enabled = true}
+  for k, v in pairs(parity or {}) do a[k] = v end
+  return a
+end
+local spawn_tool = {tool = 'hub.spawn'}
+local ui_state = {user_only = 'draft is UI state'}
 local function part(value) return tostring(#value) .. ':' .. value end
 local function context_of(args)
   local context = args.context
@@ -131,10 +139,10 @@ local function directory_nodes(draft, nodes)
       for _, tree in ipairs(trees.list) do
         local name = tree.branch or (tree.detached and 'detached' or '?')
         local mark = tree.path == trees.current and ' (current)' or ''
-        items[#items + 1] = {id = 'tree:' .. tree.path, label = 'Worktree ' .. name .. mark, detail = tree.path, action = action('choose', 'Choose')}
+        items[#items + 1] = {id = 'tree:' .. tree.path, label = 'Worktree ' .. name .. mark, detail = tree.path, action = action('choose', 'Choose', ui_state)}
       end
     end
-    items[#items + 1] = {id = 'default', label = "Use each profile's own directory", action = action('default', 'Use')}
+    items[#items + 1] = {id = 'default', label = "Use each profile's own directory", action = action('default', 'Use', ui_state)}
   end
   if #items > 0 then nodes[#nodes + 1] = {id = 'dir_choices', type = 'list', label = 'Directory', items = items} end
 end
@@ -156,7 +164,7 @@ local function render_start(args)
     end
     nodes[#nodes + 1] = {id = 'pending', type = 'widget', text = 'Starting ' .. tostring(draft.pending.profile) ..
       '… The outcome is not known yet' .. detail .. '. LazyRex will not start it twice.'}
-    nodes[#nodes + 1] = {id = 'pending_actions', type = 'list', items = {{id = 'check', label = 'Check again', action = action('check', 'Check')}}}
+    nodes[#nodes + 1] = {id = 'pending_actions', type = 'list', items = {{id = 'check', label = 'Check again', action = action('check', 'Check', spawn_tool)}}}
     nodes[#nodes + 1] = {id = 'cancel', type = 'widget', text = '', action = action('$cancel', 'Cancel')}
     return {title = title, nodes = nodes, status = {state = 'working', msg = 'Starting'}}
   end
@@ -225,7 +233,7 @@ local function render_start(args)
   local places = {{value = 'tab', label = 'New tab'}}
   if context.source_block_id then places[#places + 1] = {value = 'split', label = 'Split beside the source pane'} end
   fields[#fields + 1] = {id = 'placement', label = 'Placement', kind = 'select', required = true, value = offered(places, kept('placement', 'tab')), options = places}
-  nodes[#nodes + 1] = {id = 'start', type = 'form', fields = fields, submit_action = action('start', 'Start')}
+  nodes[#nodes + 1] = {id = 'start', type = 'form', fields = fields, submit_action = action('start', 'Start', spawn_tool)}
   nodes[#nodes + 1] = {id = 'cancel', type = 'widget', text = '', action = action('$cancel', 'Cancel')}
   return {title = title, nodes = nodes, status = {state = 'blocked', kind = 'question', msg = 'Waiting for input'}}
 end
@@ -388,8 +396,8 @@ for name in pairs(handlers) do actions[#actions + 1] = {name = name, kind = 'cli
   args = {type = 'object', additionalProperties = true}} end
 rex.call('client.keymap', {actions = actions})
 hub('hub.register', {plugin = 'profiles', instance_id = instance_id, exports = {},
-  commands = {{id = 'start_agent', title = 'Start Agent…', description = 'Start an agent profile in a directory', keywords = {'agent', 'profile', 'claude', 'codex'}, route = '/forms/start-agent'},
-    {id = 'start_accessory', title = 'Start Accessory…', description = 'Start a dev server, log tail or shell', keywords = {'accessory', 'profile', 'shell', 'server'}, route = '/forms/start-accessory'}}})
+  commands = {{id = 'start_agent', title = 'Start Agent…', description = 'Start an agent profile in a directory', keywords = {'agent', 'profile', 'claude', 'codex'}, route = '/forms/start-agent', action = 'hub.spawn'},
+    {id = 'start_accessory', title = 'Start Accessory…', description = 'Start a dev server, log tail or shell', keywords = {'accessory', 'profile', 'shell', 'server'}, route = '/forms/start-accessory', action = 'hub.spawn'}}})
 pcall(expire_drafts)
 rex.on('client_perform_requested', function(ctx, ev)
   local ok, result = pcall(function()
