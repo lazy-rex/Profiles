@@ -64,30 +64,6 @@ function M.source_directory(context, profile_cwd)
   return nil
 end
 
--- list_dir has no cursor. Keep its truncation flag so the form can ask for a narrower prefix.
-function M.list_directory(context, path, prefix)
-  text(path, 'Directory')
-  prefix = text(prefix or '', 'Prefix')
-  -- Bound one browser result, not the directory. Prefix narrowing keeps all names reachable.
-  local result = block_call(context, 'list_dir', {path = path, prefix = prefix, files = false, limit = 200})
-  if type(result.path) ~= 'string' or type(result.status) ~= 'string' then
-    fail('invalid_result', 'Rex returned an invalid directory listing')
-  end
-  local entries = {}
-  for _, entry in ipairs(result.entries or {}) do
-    if type(entry.name) ~= 'string' or entry.name == '' or entry.name:find('[/\000]') then
-      fail('invalid_result', 'Rex returned an invalid directory name')
-    end
-    if not entry.file then
-      local separator = result.path:sub(-1) == '/' and '' or '/'
-      entries[#entries + 1] = {name = entry.name, dir = result.path .. separator .. entry.name,
-        symlink = entry.symlink == true}
-    end
-  end
-  return {path = result.path, home = result.home, status = result.status,
-    entries = entries, truncated = result.truncated == true}
-end
-
 -- Do not inherit a surrounding agent's Git repository or injected Git configuration.
 local git_env = {GIT_DIR = false, GIT_WORK_TREE = false, GIT_COMMON_DIR = false,
   GIT_INDEX_FILE = false, GIT_CONFIG_COUNT = false, GIT_CONFIG_PARAMETERS = false, LC_ALL = 'C'}

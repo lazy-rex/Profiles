@@ -37,7 +37,6 @@ if request.mock_pwd ~= nil then
 end
 local ok, result = pcall(function()
   if request.method == 'source_directory' then return dirs.source_directory(request.context, request.profile_cwd) end
-  if request.method == 'list_directory' then return dirs.list_directory(request.context, request.path, request.prefix) end
   if request.method == 'worktrees' then return dirs.worktrees(request.path) end
   error('Unknown test method')
 end)
@@ -90,37 +89,6 @@ try {
     assert.equal(invoke('source_directory', {context: {...context, source_block_id: 'block:missing'}, profile_cwd: source}).ok, false);
   });
 
-  const browse = `${fixture}/browse`;
-  fs.mkdirSync(browse);
-  for (const name of ['space dir', 'line\nbreak', 'ü + %20']) fs.mkdirSync(`${browse}/${name}`);
-  fs.writeFileSync(`${browse}/ordinary-file`, 'file');
-  fs.symlinkSync(`${browse}/space dir`, `${browse}/linked dir`);
-  check('native Browse preserves directory names and excludes files', () => {
-    const listed = result('list_directory', {path: browse});
-    assert.equal(listed.status, 'ok');
-    assert.equal(listed.home, os.homedir());
-    assert.deepEqual(listed.entries.map(e => e.name).sort(), ['space dir', 'line\nbreak', 'ü + %20', 'linked dir'].sort());
-    assert(listed.entries.every(e => e.dir === `${listed.path}/${e.name}`));
-  });
-  check('native Browse returns a missing-directory status', () => {
-    assert.notEqual(result('list_directory', {path: `${browse}/missing`}).status, 'ok');
-  });
-  const many = `${fixture}/many`;
-  fs.mkdirSync(many);
-  for (let i = 0; i < 1100; i++) fs.mkdirSync(`${many}/folder-${String(i).padStart(4, '0')}`);
-  check('truncated native listing can be narrowed by prefix', () => {
-    const initial = result('list_directory', {path: many});
-    assert.equal(initial.truncated, true);
-    assert.equal(initial.entries.length, 200);
-    const narrowed = result('list_directory', {path: many, prefix: 'folder-109'});
-    assert.equal(narrowed.truncated, false);
-    assert.equal(narrowed.entries.length, 10);
-    assert(narrowed.entries.every(e => e.name.startsWith('folder-109')));
-  });
-  check('Browse without a source refuses explicitly', () => {
-    assert.equal(invoke('list_directory', {context: {}, path: browse}).result.code, 'source_unavailable');
-  });
-
   const repo = `${fixture}/repo + space`;
   const linked = `${fixture}/linked\nworktree`;
   const detached = `${fixture}/detached % tree`;
@@ -145,7 +113,7 @@ try {
       GIT_CONFIG_KEY_0: 'core.bare', GIT_CONFIG_VALUE_0: 'true'}).current, fs.realpathSync(repo));
   });
   check('non-repositories return nil; invalid directories remain errors', () => {
-    assert.equal(result('worktrees', {path: browse}), null);
+    assert.equal(result('worktrees', {path: source}), null);
     assert.equal(invoke('worktrees', {path: `${fixture}/missing`}).ok, false);
     assert.equal(invoke('worktrees', {path: 'relative'}).ok, false);
   });
