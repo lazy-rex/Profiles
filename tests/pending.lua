@@ -160,6 +160,26 @@ test('hub.spawn as an agent: pending, replay and session gone; a refused create 
   expect(F.spawn_blocks(s2, r.spawn_id)).to_have_length(1)
   expect_error(function() alice:call('hub.stop', {spawn_id = r.spawn_id}) end, 'cannot stop it')
 
+  -- lose-answer with the gated joiner: pending with one pane; after the join a replay of the same
+  -- key returns the same spawn, open, alice's, with one pane.
+  local s3 = session('pending-target-3')
+  fault({point = 'spawn-create', mode = 'lose-answer', op = 'agent-join'})
+  local join = {profile = 'joiner', cwd = F.sub, placement = {session = s3}, key = 'agent-join'}
+  local j = alice:call('hub.spawn', join)
+  expect(j.status).to_be('pending')
+  expect(alice:call('hub.spawn', join).status).to_be('pending')
+  expect(F.spawn_blocks(s3, j.spawn_id)).to_have_length(1)
+  F.run({'touch', gate})
+  local opened = wait('the agent joins', function()
+    local x = alice:call('hub.spawn', join)
+    return x.status == 'open' and x or nil
+  end, 20)
+  F.run({'rm', gate})
+  expect(opened.spawn_id).to_be(j.spawn_id)
+  expect(F.spawn_blocks(s3, j.spawn_id)).to_have_length(1)
+  local jw = F.worker(alice, j.spawn_id)
+  expect({jw.parent, jw.cwd}).to_equal({'alice', F.sub})
+
   -- refuse: the spawn fails at once.
   fault({point = 'spawn-create', mode = 'refuse', op = 'agent-refuse'})
   local refused = alice:call('hub.spawn', {profile = 'logtail', cwd = F.sub, placement = {session = s2}, key = 'agent-refuse'})
