@@ -94,8 +94,8 @@ function M.worktrees(path)
   local current = git_ok(path, {'rev-parse', '--show-toplevel'}):gsub('\n$', '')
   local raw = git_ok(path, {'worktree', 'list', '--porcelain', '-z'})
   local rows, row, repo = {}, nil, nil
-  -- finish takes row as an argument and writes no captured local. Rex Lua can lose a closure's
-  -- write to a captured local after a pcall catches (observed on Rex 0.0.1792158932-g88fd41).
+  -- finish takes row as an argument and writes no captured local: after a caught error, Rex Lua
+  -- can lose a closure's write to one (LazyRex docs/rex-protocol.md, "Rex Lua runtime: rex do").
   local function finish(r)
     if r and not r.bare then rows[#rows + 1] = r end
   end
