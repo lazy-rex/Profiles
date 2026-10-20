@@ -35,7 +35,8 @@ cd ../../Profiles && lazyrex-hub test
 - form.lua: the form's tree, its draft and the Directory field's text.
 - pending.lua: pending and failed starts (the hub's spawn-create faults).
 - restart.lua: a pending start across a hub stop and a crash.
-- errors.lua: a hub refusal ends the operation.
+- errors.lua: a hub refusal ends the operation. A missing directory fails at once: the profile's own
+  (form and hub.spawn), a shown directory removed before Start, and `~` text (form).
 - directories.lua: the directory helper (OSC 7 and Git worktrees).
 
 `tests/support/fixture.lua` is the shared lab fixture: a Git repository and worktree, a source
