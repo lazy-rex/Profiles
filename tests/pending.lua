@@ -132,6 +132,23 @@ test('a refused create: the form shows the error and Start returns', function()
   expect(F.spawn_blocks(src.session, list[1].spawn_id)).to_have_length(0)
 end)
 
+-- client_unavailable is not final: the hub retries the view operation (viewsvc.go, definiteFailure).
+-- The retry must send the saved request with the same key, so a spawn whose reply was lost
+-- starts one worker, not two. Limit: the fault is an injected error reply, not a real dropped
+-- connection (docs/testing.md, "Faults").
+test('a lost hub.spawn reply (client_unavailable): the retry returns the same spawn', function()
+  local src = F.source()
+  local v = F.form(src, 'start_accessory')
+  local f = fault({point = 'action', action = 'hub.spawn', when = 'after', mode = 'fail', fail_code = 'client_unavailable'})
+  local op = succeeded(v:action('start', 'start', {values = values()}, 'lost-reply'))
+  expect(fault_fired(f)).to_be(true)
+  expect(op.result).to_equal({close_form = true})
+  local list = workers_of(src.session, 'logtail')
+  expect(list).to_have_length(1)
+  expect(list[1].state).to_be('running')
+  expect(F.spawn_blocks(src.session, list[1].spawn_id)).to_have_length(1)
+end)
+
 test('hub.spawn as an agent: pending, replay and session gone; a refused create fails', function()
   local target = session('pending-target')
   -- drop: pending with no pane; a replay returns the same spawn; the session closes; the same key

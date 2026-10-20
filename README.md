@@ -33,7 +33,8 @@ cd ../../Profiles && lazyrex-hub test
 - start.lua: each start flow as the user (the form) and as an agent (hub.spawn); admission,
   replay, conflicts and stop.
 - form.lua: the form's tree, its draft and the Directory field's text.
-- pending.lua: pending and failed starts (the hub's spawn-create faults).
+- pending.lua: pending and failed starts (the hub's spawn-create faults), and a lost hub.spawn
+  reply that the hub retries with the same key.
 - restart.lua: a pending start across a hub stop and a crash.
 - errors.lua: a hub refusal ends the operation. A missing directory fails at once: the profile's own
   (form and hub.spawn), a shown directory removed before Start, and `~` text (form).
