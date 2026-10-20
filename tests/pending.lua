@@ -135,6 +135,11 @@ end)
 -- Dismiss forgets a pending start in the form only. The hub's spawn stays (a pane may still
 -- appear), so the form warns first and after.
 local warning = 'Dismiss this pending start? A pane may still appear. Starting again can create a duplicate.'
+-- The note after a dismiss claims no worker state: the start can open or stay unknown later.
+local function dismissed_note(profile)
+  return 'You dismissed the pending start of ' .. profile .. '. Dismiss does not stop or remove the worker. ' ..
+    'A pane may still appear. Starting again can create a duplicate.'
+end
 local function dismiss(v, spawn_id, key)
   return succeeded(v:action('dismiss_actions', 'dismiss', {item_id = 'dismiss:' .. spawn_id}, key))
 end
@@ -171,8 +176,7 @@ test('Dismiss: the form forgets the pending start, keeps the values, and the hub
   expect(store('draft/' .. v.id).rev).to_be(rev)
   tree = v:render()
   expect(node(tree, 'pending')).to_be(nil)
-  expect(node(tree, 'dismissed').text).to_be('You dismissed the pending start of logtail. LazyRex still lists it as starting. ' ..
-    'A pane may still appear. Starting again can create a duplicate.')
+  expect(node(tree, 'dismissed').text).to_be(dismissed_note('logtail'))
   local shown = {}
   for _, f in ipairs(node(tree, 'start').fields) do shown[f.id] = f.value end
   expect(shown).to_equal(submitted)
@@ -187,6 +191,31 @@ test('Dismiss: the form forgets the pending start, keeps the values, and the hub
   expect(op.result).to_equal({close_form = true})
   local both = workers_of(src.session, 'logtail')
   expect(both).to_have_length(2)
+end)
+
+test('Dismiss after the agent joined: the running worker and its pane stay; the note claims no state', function()
+  local src = F.source()
+  local v = F.form(src, 'start_agent')
+  fault({point = 'spawn-create', mode = 'lose-answer', op = 'profiles-start/dismiss-join'})
+  succeeded(v:action('start', 'start', {values = values({profile = 'joiner'})}, 'dismiss-join'))
+  local spawn_id = workers_of(src.session, 'joiner')[1].spawn_id
+  expect(node(v:render(), 'dismiss_actions').items[1].id).to_be('dismiss:' .. spawn_id)
+  -- The agent joins, but the form does not know yet (no Check again).
+  F.run({'touch', gate})
+  local ok, err = pcall(function()
+    wait('the agent joins', function()
+      local w = F.worker(alice, spawn_id)
+      return w and w.state == 'running' or nil
+    end, 20)
+    dismiss(v, spawn_id, 'dismiss-join-op')
+    expect(node(v:render(), 'dismissed').text).to_be(dismissed_note('joiner'))
+    local w = F.worker(alice, spawn_id)
+    expect({w.state, w.parent}).to_equal({'running', 'user'})
+    expect(F.spawn_blocks(src.session, spawn_id)).to_have_length(1)
+    expect(workers_of(src.session, 'joiner')).to_have_length(1)
+  end)
+  F.run({'rm', gate})
+  if not ok then error(err, 0) end
 end)
 
 test('Dismiss: a stale or absent target changes nothing and writes nothing', function()

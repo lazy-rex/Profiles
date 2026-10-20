@@ -198,7 +198,8 @@ local function render_start(args)
   if draft.error then nodes[#nodes + 1] = {id = 'start_error', type = 'widget', text = 'The last start failed: ' .. draft.error} end
   if draft.dismissed then
     nodes[#nodes + 1] = {id = 'dismissed', type = 'widget', text = 'You dismissed the pending start of ' .. tostring(draft.dismissed) ..
-      '. LazyRex still lists it as starting. A pane may still appear. Starting again can create a duplicate.'}
+      '. Dismiss does not stop or remove the worker. A pane may still appear. ' ..
+      'Starting again can create a duplicate.'}
   end
   directory_nodes(draft, nodes)
   local options, fields, seen, order = {}, {}, {}, {}
