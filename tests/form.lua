@@ -143,6 +143,12 @@ test('a broken profile file shows its error; a kind with no profiles says so', f
   expect(node(v:render(), 'start')).to_be_truthy()
 end)
 
+test('the plugin expires old drafts when it starts, after its main chunk', function()
+  write({{key = 'draft/stale-at-start', value = {at = os.time() - 2 * 24 * 3600, dir = F.sub}}})
+  hub:restart()
+  wait('the stale draft expires at start', function() return store('draft/stale-at-start').rev == '0' end, 15)
+end)
+
 test('a draft whose form never ended expires after a day', function()
   write({{key = 'draft/stale-view', value = {at = os.time() - 2 * 24 * 3600, dir = F.sub}},
     {key = 'draft/fresh-view', value = {at = os.time() - 3600, dir = F.sub}}})

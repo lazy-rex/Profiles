@@ -431,7 +431,9 @@ rex.call('client.keymap', {actions = actions})
 hub('hub.register', {plugin = 'profiles', instance_id = instance_id, exports = {},
   commands = {{id = 'start_agent', title = 'Start Agent…', description = 'Start an agent profile in a directory', keywords = {'agent', 'profile', 'claude', 'codex'}, route = '/forms/start-agent', action = 'hub.spawn'},
     {id = 'start_accessory', title = 'Start Accessory…', description = 'Start a dev server, log tail or shell', keywords = {'accessory', 'profile', 'shell', 'server'}, route = '/forms/start-accessory', action = 'hub.spawn'}}})
-pcall(expire_drafts)
+-- Not in the main chunk: a catch there can split module-level locals (LazyRex
+-- docs/rex-protocol.md, "Rex Lua runtime: rex do").
+rex.after(0, function() pcall(expire_drafts) end)
 rex.on('client_perform_requested', function(ctx, ev)
   local ok, result = pcall(function()
     if not ev.requester or ev.requester.client_id ~= hub_id then fail('refused', 'Only the hub calls profiles actions') end
