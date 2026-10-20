@@ -132,6 +132,91 @@ test('a refused create: the form shows the error and Start returns', function()
   expect(F.spawn_blocks(src.session, list[1].spawn_id)).to_have_length(0)
 end)
 
+-- Dismiss forgets a pending start in the form only. The hub's spawn stays (a pane may still
+-- appear), so the form warns first and after.
+local warning = 'Dismiss this pending start? A pane may still appear. Starting again can create a duplicate.'
+local function dismiss(v, spawn_id, key)
+  return succeeded(v:action('dismiss_actions', 'dismiss', {item_id = 'dismiss:' .. spawn_id}, key))
+end
+
+test('Dismiss: the form forgets the pending start, keeps the values, and the hub keeps the spawn', function()
+  local src = F.source()
+  local v = F.form(src, 'start_accessory')
+  fault({point = 'spawn-create', mode = 'drop', op = 'profiles-start/dismiss-1'})
+  local submitted = values({title = 'Mine'})
+  succeeded(v:action('start', 'start', {values = submitted}, 'dismiss-1'))
+  local pending = workers_of(src.session, 'logtail')
+  expect(pending).to_have_length(1)
+  local spawn_id = pending[1].spawn_id
+
+  -- The full warning is its own widget, just before the action. The action is UI state.
+  local tree = v:render()
+  local ids = {}
+  for _, n in ipairs(tree.nodes) do ids[#ids + 1] = n.id end
+  expect(ids).to_equal({'pending', 'pending_actions', 'dismiss_warning', 'dismiss_actions', 'cancel'})
+  expect(node(tree, 'dismiss_warning').text).to_be(warning)
+  local item = node(tree, 'dismiss_actions').items[1]
+  expect({item.id, item.label, item.action.label}).to_equal({'dismiss:' .. spawn_id, 'Dismiss pending start', 'Dismiss pending start'})
+  expect(item.action.user_only).to_be('draft is UI state')
+  expect(item.action.tool).to_be(nil)
+
+  -- The dismiss write commits, then its reply is lost: the hub runs the action again, which finds
+  -- no matching pending start and changes nothing. A replay with the same arguments returns the
+  -- recorded result.
+  local lost = fault({point = 'action', action = 'hub.store.batch', when = 'after', mode = 'lose-reply'})
+  dismiss(v, spawn_id, 'dismiss-op-1')
+  expect(fault_fired(lost)).to_be(true)
+  local rev = store('draft/' .. v.id).rev
+  dismiss(v, spawn_id, 'dismiss-op-1')
+  expect(store('draft/' .. v.id).rev).to_be(rev)
+  tree = v:render()
+  expect(node(tree, 'pending')).to_be(nil)
+  expect(node(tree, 'dismissed').text).to_be('You dismissed the pending start of logtail. LazyRex still lists it as starting. ' ..
+    'A pane may still appear. Starting again can create a duplicate.')
+  local shown = {}
+  for _, f in ipairs(node(tree, 'start').fields) do shown[f.id] = f.value end
+  expect(shown).to_equal(submitted)
+  -- The hub's spawn is unchanged: still starting, no pane.
+  local after = workers_of(src.session, 'logtail')
+  expect(after).to_have_length(1)
+  expect({after[1].spawn_id, after[1].state}).to_equal({spawn_id, 'starting'})
+  expect(F.spawn_blocks(src.session, spawn_id)).to_have_length(0)
+
+  -- Start runs again with a new key: a second worker, as the warning says. The note goes away.
+  local op = succeeded(v:action('start', 'start', {values = submitted}, 'dismiss-2'))
+  expect(op.result).to_equal({close_form = true})
+  local both = workers_of(src.session, 'logtail')
+  expect(both).to_have_length(2)
+end)
+
+test('Dismiss: a stale or absent target changes nothing and writes nothing', function()
+  local src = F.source()
+  local v = F.form(src, 'start_accessory')
+  -- Absent: no pending start.
+  local rev = store('draft/' .. v.id).rev
+  dismiss(v, 'spawn-none', 'stale-0')
+  expect(store('draft/' .. v.id).rev).to_be(rev)
+
+  fault({point = 'spawn-create', mode = 'drop', op = 'profiles-start/stale-1'})
+  succeeded(v:action('start', 'start', {values = values()}, 'stale-1'))
+  local first = workers_of(src.session, 'logtail')[1].spawn_id
+  dismiss(v, first, 'stale-op-1')
+  -- A newer pending start in the same form.
+  fault({point = 'spawn-create', mode = 'drop', op = 'profiles-start/stale-2'})
+  succeeded(v:action('start', 'start', {values = values()}, 'stale-2'))
+  local second
+  for _, w in ipairs(workers_of(src.session, 'logtail')) do if w.spawn_id ~= first then second = w.spawn_id end end
+  expect(second).to_be_truthy()
+  rev = store('draft/' .. v.id).rev
+  -- A Dismiss of the old target (a new key, as from an older tree) leaves the newer start pending.
+  dismiss(v, first, 'stale-op-2')
+  expect(store('draft/' .. v.id).rev).to_be(rev)
+  local tree = v:render()
+  expect(node(tree, 'pending')).to_be_truthy()
+  expect(node(tree, 'dismiss_actions').items[1].id).to_be('dismiss:' .. second)
+  expect(workers_of(src.session, 'logtail')).to_have_length(2)
+end)
+
 -- client_unavailable is not final: the hub retries the view operation (viewsvc.go, definiteFailure).
 -- The retry must send the saved request with the same key, so a spawn whose reply was lost
 -- starts one worker, not two. Limit: the fault is an injected error reply, not a real dropped

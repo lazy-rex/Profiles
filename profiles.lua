@@ -37,6 +37,7 @@ local function action(name, label, parity)
 end
 local spawn_tool = {tool = 'hub.spawn'}
 local ui_state = {user_only = 'draft is UI state'}
+local dismiss_warning = 'Dismiss this pending start? A pane may still appear. Starting again can create a duplicate.'
 local function part(value) return tostring(#value) .. ':' .. value end
 local function context_of(args)
   local context = args.context
@@ -54,9 +55,9 @@ local function profiles_of(kind)
 end
 
 -- The draft holds the form's directory choice for one form view:
--- {dir, dir_source, dir_rev, at, pending, error, values}. dir = nil means each profile's own
--- directory. dir_rev counts the explicit directory choices (see choose_dir). Drafts from before
--- the in-form browser was removed can also hold browse and prefix; nothing reads them.
+-- {dir, dir_source, dir_rev, at, pending, error, dismissed, values}. dir = nil means each
+-- profile's own directory. dir_rev counts the explicit directory choices (see choose_dir). Drafts
+-- from before the in-form browser was removed can also hold browse and prefix; nothing reads them.
 local function draft_key(args)
   if type(args.view_id) ~= 'string' or args.view_id == '' then fail('invalid_input', 'The hub sent no view_id') end
   return 'draft/' .. args.view_id
@@ -171,6 +172,13 @@ local function render_start(args)
     nodes[#nodes + 1] = {id = 'pending', type = 'widget', text = 'Starting ' .. tostring(draft.pending.profile) ..
       '… The outcome is not known yet' .. detail .. '. LazyRex will not start it twice.'}
     nodes[#nodes + 1] = {id = 'pending_actions', type = 'list', items = {{id = 'check', label = 'Check again', action = action('check', 'Check', spawn_tool)}}}
+    -- Dismiss forgets the pending start in this form only. The hub still tracks the spawn, so the
+    -- warning comes first, in full (a row label can be cut off).
+    if type(draft.pending.spawn_id) == 'string' and draft.pending.spawn_id ~= '' then
+      nodes[#nodes + 1] = {id = 'dismiss_warning', type = 'widget', text = dismiss_warning}
+      nodes[#nodes + 1] = {id = 'dismiss_actions', type = 'list', items = {{id = 'dismiss:' .. draft.pending.spawn_id,
+        label = 'Dismiss pending start', action = action('dismiss', 'Dismiss pending start', ui_state)}}}
+    end
     nodes[#nodes + 1] = {id = 'cancel', type = 'widget', text = '', action = action('$cancel', 'Cancel')}
     return {title = title, nodes = nodes, status = {state = 'working', msg = 'Starting'}}
   end
@@ -188,6 +196,10 @@ local function render_start(args)
     return {title = title, nodes = nodes}
   end
   if draft.error then nodes[#nodes + 1] = {id = 'start_error', type = 'widget', text = 'The last start failed: ' .. draft.error} end
+  if draft.dismissed then
+    nodes[#nodes + 1] = {id = 'dismissed', type = 'widget', text = 'You dismissed the pending start of ' .. tostring(draft.dismissed) ..
+      '. LazyRex still lists it as starting. A pane may still appear. Starting again can create a duplicate.'}
+  end
   directory_nodes(draft, nodes)
   local options, fields, seen, order = {}, {}, {}, {}
   -- After a failed pending start, the fields show the values that the user submitted.
@@ -311,14 +323,14 @@ local function finish(args, op_key, request, values)
     return change_draft(args, function(d)
       d.pending = {op_key = op_key, profile = request.profile, spawn_id = result.spawn_id}
       if values then d.values = values end -- restored in the fields if the start fails
-      d.error = nil
+      d.error, d.dismissed = nil, nil
     end)
   end
   if result.status == 'failed' then
     -- The earlier spawn definitely failed: Start returns, and a new submit uses a new key. The
     -- fields show the submitted values again (Check again has none: the pending start saved them).
     return change_draft(args, function(d)
-      d.pending = nil
+      d.pending, d.dismissed = nil, nil
       if values then d.values = values end
       d.error = result.error or 'The profile did not start'
     end)
@@ -378,6 +390,18 @@ local function view_action(args)
     local pending = draft.rev ~= '0' and draft.value.pending
     if type(pending) ~= 'table' or type(pending.op_key) ~= 'string' then return {} end
     return finish(args, pending.op_key, saved_request(pending.op_key))
+  end
+  -- Dismiss clears only the pending start that the form showed (its spawn_id). A stale or absent
+  -- target changes nothing and writes nothing. The saved values and start record stay; the hub's
+  -- spawn does not change.
+  if args.node_id == 'dismiss_actions' and args.action == 'dismiss' and id:sub(1, 8) == 'dismiss:' then
+    local spawn_id = id:sub(9)
+    local function matches(d) return type(d.pending) == 'table' and d.pending.spawn_id == spawn_id end
+    local draft = read_draft(draft_key(args))
+    if draft.rev == '0' or not matches(draft.value) then return {} end
+    return change_draft(args, function(d)
+      if matches(d) then d.dismissed, d.pending = tostring(d.pending.profile), nil end
+    end)
   end
   if args.node_id == 'dir_choices' then
     if args.action == 'default' then

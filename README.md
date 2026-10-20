@@ -18,6 +18,13 @@ Agents start profiles with the hub's own tools, `hub.profiles` and `hub.spawn`; 
 no actions. The form fills one `hub.spawn` request, so its Start and Check again name that tool.
 The directory choices in the form are UI state: an agent sends `cwd` directly.
 
+## Pending starts
+
+When the outcome of a start is not known, the form shows it as pending, with Check again (the same
+`hub.spawn` request and key) and Dismiss pending start. Dismiss forgets the pending start in this
+form only. It is UI state, so it has no agent tool. The hub still tracks the spawn, so a pane can
+still appear, and a new start can create a duplicate: the form says so before and after.
+
 ## Tests
 
 The tests are Lua files in `tests/`. `lazyrex-hub test` runs them against the real hub, on an
@@ -34,7 +41,7 @@ cd ../../Profiles && lazyrex-hub test
   replay, conflicts and stop.
 - form.lua: the form's tree, its draft and the Directory field's text.
 - pending.lua: pending and failed starts (the hub's spawn-create faults), and a lost hub.spawn
-  reply that the hub retries with the same key.
+  reply that the hub retries with the same key; Dismiss pending start.
 - restart.lua: a pending start across a hub stop and a crash.
 - errors.lua: a hub refusal ends the operation. A missing directory fails at once: the profile's own
   (form and hub.spawn), a shown directory removed before Start, and `~` text (form).
