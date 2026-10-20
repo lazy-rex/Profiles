@@ -94,21 +94,22 @@ function M.worktrees(path)
   local current = git_ok(path, {'rev-parse', '--show-toplevel'}):gsub('\n$', '')
   local raw = git_ok(path, {'worktree', 'list', '--porcelain', '-z'})
   local rows, row, repo = {}, nil, nil
-  local function finish()
-    if row and not row.bare then rows[#rows + 1] = row end
-    row = nil
+  -- finish takes row as an argument and writes no captured local. Rex Lua can lose a closure's
+  -- write to a captured local after a pcall catches (observed on Rex 0.0.1792158932-g88fd41).
+  local function finish(r)
+    if r and not r.bare then rows[#rows + 1] = r end
   end
   for field in raw:gmatch('([^%z]*)%z') do
-    if field == '' then finish()
+    if field == '' then finish(row); row = nil
     elseif field:sub(1, 9) == 'worktree ' then
-      finish()
+      finish(row)
       row = {path = field:sub(10), detached = false}
       repo = repo or row.path
     elseif row and field:sub(1, 7) == 'branch ' then row.branch = field:sub(8):gsub('^refs/heads/', '')
     elseif row and field == 'detached' then row.detached = true
     elseif row and field == 'bare' then row.bare = true end
   end
-  finish()
+  finish(row)
   return {repo = repo, current = current, list = rows}
 end
 
