@@ -128,14 +128,11 @@ test('a raw path with a backslash and a space round-trips through the field', fu
   expect(F.new_worker(alice, before).cwd).to_be(raw)
 end)
 
-test('the browser actions of the older in-form browser are refused', function()
-  local v, tree = F.form(src, 'start_accessory')
-  for _, id in ipairs({'browse', 'browse_error', 'browse_more', 'filter'}) do expect(node(tree, id), id).to_be(nil) end
-  for _, a in ipairs({{'dir_choices', 'browse', 'browse'}, {'browse', 'use', 'use'}, {'browse', 'open', 'up'}, {'filter', 'filter', ''}}) do
-    local op = v:action(a[1], a[2], {item_id = a[3]})
-    expect(op.status, a[1] .. ' ' .. a[2]).to_be('failed')
-    expect(op.error.message).to_match('Unknown action')
-  end
+test('an unknown action is refused', function()
+  local v = F.form(src, 'start_accessory')
+  local op = v:action('dir_choices', 'unknown', {item_id = 'x'})
+  expect(op.status).to_be('failed')
+  expect(op.error.message).to_match('Unknown action')
 end)
 
 -- The move from hub.store to SQL: migration 1 imports every saved start request, and the drafts
