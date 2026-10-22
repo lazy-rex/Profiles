@@ -1,33 +1,28 @@
 -- Start Agent… and Start Accessory…: palette commands that open a form in the side slot. The form
 -- starts a profile with hub.spawn in a chosen directory, in a new tab or in a split beside the
 -- source pane. The hub owns profiles, spawns and placement; Rex and Git own directories
--- (profiles_directories.lua). This plugin owns only the form and its draft.
-local hub_id = assert(rex.args.hub_client_id, 'hub_client_id is required')
-local instance_id = assert(rex.args.instance_id, 'instance_id is required')
-local function fail(code, message) error({code = code, message = message}) end
-local function hub(action, args)
-  local response, call_error = rex.call('client.perform', {client_id = hub_id, action = action, args = args or {}, timeout_ms = 10000})
-  if type(response) ~= 'table' then
-    if type(call_error) == 'table' then fail(call_error.code or 'unavailable', call_error.message or 'Hub request failed') end
-    -- Observed on Rex 0.0.1792158932-g88fd41 (lab): a hub error arrives as text that ends with
-    -- "(status=<n> code=<code>)". Keep the hub's code: a refusal is final. Only an error with no
-    -- code (a lost or timed-out call) is unavailable, so the hub retries it.
-    local text = tostring(call_error or 'Hub request failed')
-    local code = text:match('code=([%w_]+)%)$')
-    if not code or code == 'unavailable' or code == 'disconnected' or code == 'timeout' then fail('unavailable', text) end
-    fail(code, text:match('failed: (.-) %(status=%d+ code=[%w_]+%)$') or text)
-  end
-  if type(response.result) ~= 'table' then fail('internal', 'Invalid hub result') end
-  return response.result
-end
--- The helper is a sibling file. The hub starts this script by its absolute path (lab, Rex 1203:
--- debug.getinfo gives that path without a leading @).
-local script = debug.getinfo(1, 'S').source:gsub('^@', '')
-if script:sub(1, 1) ~= '/' then fail('internal', 'The plugin path is not absolute: ' .. script) end
-local dirs = assert(loadfile(script:match('^(.*)/') .. '/profiles_directories.lua'))()
+-- (profiles_directories.lua). This plugin owns only the form, its draft and its saved starts.
+-- The LazyRex Plugin SDK (docs/plugin-sdk.md) does the registration, the hub calls and the storage.
+if rex.args.lazyrex_sdk then package.path = rex.args.lazyrex_sdk .. '/?.lua;' .. package.path end
+local app = require('lazyrex').plugin('profiles')
+local dirs = require('profiles_directories')
+local db, fail = app.db, app.fail
 
 local kinds = {['/forms/start-agent'] = 'agent', ['/forms/start-accessory'] = 'accessory'}
 local draft_ttl = 24 * 3600 -- a draft whose form never ended expires after a day
+
+-- A draft holds the form's directory choice for one form view. dir = NULL means each profile's own
+-- directory. dir_rev counts the explicit directory choices (see choose_dir). saved_values holds the
+-- submitted values of a failed or pending start (JSON). A start holds the exact hub.spawn request
+-- of one submit (JSON), saved before hub.spawn.
+local schema = {
+  'CREATE TABLE starts (op_key TEXT PRIMARY KEY, view_id TEXT NOT NULL, at INTEGER NOT NULL, request TEXT NOT NULL, saved_values TEXT)',
+  'CREATE TABLE drafts (view_id TEXT PRIMARY KEY, at INTEGER NOT NULL, dir TEXT, dir_source TEXT, dir_rev INTEGER NOT NULL DEFAULT 0, ' ..
+    'note TEXT, error TEXT, dismissed TEXT, saved_values TEXT, pending_key TEXT, pending_profile TEXT, pending_spawn_id TEXT)',
+  'CREATE INDEX drafts_at ON drafts (at)',
+  'CREATE INDEX starts_at ON starts (at)',
+}
+
 -- Agent parity: each user action names its agent tool or a user_only reason. Agents start a
 -- profile with the hub's own hub.spawn; the form only fills one hub.spawn request.
 local function action(name, label, parity)
@@ -46,95 +41,91 @@ local function context_of(args)
   end
   return context
 end
+local function view_id(args)
+  if type(args.view_id) ~= 'string' or args.view_id == '' then fail('invalid_input', 'The hub sent no view_id') end
+  return args.view_id
+end
 local function profiles_of(kind)
   local list = {}
-  for _, profile in ipairs(hub('hub.profiles').profiles or {}) do
+  for _, profile in ipairs(app.hub('hub.profiles').profiles or {}) do
     if profile.kind == kind then list[#list + 1] = profile end
   end
   return list
 end
+local function json(text) return text and rex.json.decode(text) or nil end
 
--- The draft holds the form's directory choice for one form view:
--- {dir, dir_source, dir_rev, at, pending, error, dismissed, values}. dir = nil means each
--- profile's own directory. dir_rev counts the explicit directory choices (see choose_dir). Drafts
--- from before the in-form browser was removed can also hold browse and prefix; nothing reads them.
-local function draft_key(args)
-  if type(args.view_id) ~= 'string' or args.view_id == '' then fail('invalid_input', 'The hub sent no view_id') end
-  return 'draft/' .. args.view_id
+local function read_draft(id)
+  local d = db.first('SELECT * FROM drafts WHERE view_id = ?', id)
+  if not d then return nil end
+  d.values = json(d.saved_values)
+  if d.pending_key then d.pending = {op_key = d.pending_key, profile = d.pending_profile, spawn_id = d.pending_spawn_id} end
+  return d
 end
-local function read_draft(key)
-  local record = hub('hub.store.get', {keys = {key}}).records[key]
-  if type(record) ~= 'table' or type(record.rev) ~= 'string' then fail('internal', 'Invalid store record: ' .. key) end
-  return record
-end
+-- A start's own row stays while a pending draft names it.
 local function expire_drafts()
+  local old = os.time() - draft_ttl
+  db.exec('DELETE FROM drafts WHERE at < ?', old)
+  db.exec('DELETE FROM starts WHERE at < ? AND op_key NOT IN (SELECT pending_key FROM drafts WHERE pending_key IS NOT NULL)', old)
+end
+
+-- The one-time import of the drafts from hub.store (before the move to SQL). A pending draft keeps
+-- its saved start, so the form still offers Check again. Other operation records are not imported:
+-- hub.spawn is idempotent per key, so a start that the hub retries after the move cannot run twice.
+local function import_drafts()
   local now, after = os.time(), nil
   repeat
-    local page = hub('hub.store.scan', {prefix = 'draft/', after = after, limit = 100})
-    local ops = {}
+    local page = app.hub('hub.store.scan', {prefix = 'draft/', after = after, limit = 100})
     for key, record in pairs(page.records or {}) do
-      if type(record.value) ~= 'table' or type(record.value.at) ~= 'number' or record.value.at < now - draft_ttl then
-        ops[#ops + 1] = {key = key, if_rev = record.rev, delete = true}
+      local d = type(record) == 'table' and record.value
+      if type(d) == 'table' and type(d.at) == 'number' and d.at >= now - draft_ttl then
+        local p = type(d.pending) == 'table' and type(d.pending.op_key) == 'string' and d.pending or nil
+        local saved = p and app.hub('hub.store.op', {key = p.op_key})
+        local start = saved and saved.found and type(saved.result) == 'table' and saved.result
+        if start and type(start.request) == 'table' then
+          db.exec('INSERT INTO starts (op_key, view_id, at, request, saved_values) VALUES (?, ?, ?, ?, ?)', p.op_key, key:sub(7), d.at,
+            rex.json.encode(start.request), type(start.values) == 'table' and rex.json.encode(start.values) or nil)
+        else
+          p = nil
+        end
+        db.exec('INSERT INTO drafts (view_id, at, dir, dir_source, dir_rev, note, error, dismissed, saved_values, pending_key, pending_profile, pending_spawn_id) ' ..
+          'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', key:sub(7), d.at, d.dir, d.dir_source, tonumber(d.dir_rev) or 0, d.note, d.error,
+          d.dismissed, type(d.values) == 'table' and rex.json.encode(d.values) or nil, p and p.op_key, p and tostring(p.profile), p and p.spawn_id)
       end
     end
-    if #ops > 0 then hub('hub.store.batch', {ops = ops}) end
     after = page.next
   until type(after) ~= 'string' or after == ''
 end
+schema[#schema + 1] = import_drafts
+app.db.migrate {function() for _, step in ipairs(schema) do if type(step) == 'function' then step() else db.exec(step) end end end}
 
 -- The first render records the default directory, so the start uses the directory that the form
 -- showed, also when the source pane changes directory later.
-local function ensure_draft(args, key)
-  local record = read_draft(key)
-  if record.rev ~= '0' then return record.value end
-  local value = {at = os.time()}
+local function ensure_draft(args)
+  local id = view_id(args)
+  local draft = read_draft(id)
+  if draft then return draft end
+  local dir, source, note
   local ok, found = pcall(dirs.source_directory, context_of(args), nil)
-  if ok and found then value.dir, value.dir_source = found.path, found.source
-  elseif not ok then value.note = type(found) == 'table' and found.message or tostring(found) end
-  local stored = hub('hub.store.batch', {ops = {{key = key, if_rev = '0', value = value}}})
-  if type(stored.revs) ~= 'table' then return read_draft(key).value end
-  pcall(expire_drafts)
-  return value
-end
-
--- change_draft applies one action to the draft. The operation record commits with the draft, so a
--- replayed action (same operation key) changes nothing again.
-local function change_draft(args, change)
-  if type(args.operation_key) ~= 'string' or args.operation_key == '' then fail('invalid_input', 'An operation key is required') end
-  local key = draft_key(args)
-  local op = {key = 'draft-op/' .. part(args.view_id) .. part(args.operation_key), fingerprint = 'draft-v1/' .. part(args.node_id) .. part(args.action), result = {}}
-  for _ = 1, 5 do
-    local record = read_draft(key)
-    local value = record.rev ~= '0' and record.value or {at = os.time()}
-    change(value)
-    value.at = os.time()
-    local stored = hub('hub.store.batch', {ops = {{key = key, if_rev = record.rev, value = value}}, op = op})
-    if stored.op_exists or type(stored.revs) == 'table' then return {} end
-    if not stored.conflict or stored.conflict.kind ~= 'revision' then fail('internal', 'Invalid draft write result') end
-  end
-  fail('unavailable', 'The form changed during the action; try again')
+  if ok and found then dir, source = found.path, found.source
+  elseif not ok then note = type(found) == 'table' and found.message or tostring(found) end
+  db.exec('INSERT INTO drafts (view_id, at, dir, dir_source, note) VALUES (?, ?, ?, ?, ?) ON CONFLICT (view_id) DO NOTHING', id, os.time(), dir, source, note)
+  expire_drafts()
+  return read_draft(id)
 end
 
 -- The draft holds a raw path; the Directory field holds editor text, which normalize_dir decodes.
 -- For an absolute path only the backslash is special, so escaping it makes the round trip exact.
 local function dir_text(dir) return dir and (dir:gsub('\\', '\\\\')) or '' end
 
--- Rex Lua is 5.1 (no math.tointeger): a stored count is a number that may be missing or invalid.
-local function count(value)
-  value = tonumber(value)
-  if value and value >= 0 and value == math.floor(value) then return value end
-  return 0
-end
-
--- An explicit directory choice (a worktree or the profile default) must
--- reach the Directory field, also when the user edited it. The choice increments dir_rev, the
--- field's rev: a changed rev makes the renderer replace the editor text. The choice also replaces
--- the directory in the values saved by a failed start, and keeps the other saved values.
-local function choose_dir(d, dir, source)
-  d.dir = dir
-  d.dir_source = source
-  d.dir_rev = count(d.dir_rev) + 1
-  if type(d.values) == 'table' then d.values.dir = dir_text(dir) end
+-- An explicit directory choice (a worktree or the profile default) must reach the Directory field,
+-- also when the user edited it. The choice increments dir_rev, the field's rev: a changed rev makes
+-- the renderer replace the editor text. The choice also replaces the directory in the values saved
+-- by a failed start, and keeps the other saved values.
+local function choose_dir(args, dir, source)
+  db.exec('INSERT INTO drafts (view_id, at, dir, dir_source, dir_rev) VALUES (?, ?, ?, ?, 1) ON CONFLICT (view_id) DO UPDATE SET ' ..
+    "at = excluded.at, dir = excluded.dir, dir_source = excluded.dir_source, dir_rev = dir_rev + 1, saved_values = json_set(saved_values, '$.dir', ?)",
+    view_id(args), os.time(), dir, source, dir_text(dir))
+  return {}
 end
 
 local function directory_nodes(draft, nodes)
@@ -154,10 +145,10 @@ local function directory_nodes(draft, nodes)
   if #items > 0 then nodes[#nodes + 1] = {id = 'dir_choices', type = 'list', label = 'Directory', items = items} end
 end
 
-local function render_start(args)
+local function render_start(ctx, args)
   local kind = kinds[args.route]
   local context = context_of(args)
-  local draft = ensure_draft(args, draft_key(args))
+  local draft = ensure_draft(args)
   local title = kind == 'agent' and 'Start Agent' or 'Start Accessory'
   local nodes = {}
   if draft.pending then
@@ -165,7 +156,7 @@ local function render_start(args)
     -- the saved request, also when the profiles file broke or lost the profile since. Start stays
     -- hidden: a new key could start a second copy.
     local detail = ''
-    local listed, workers = pcall(hub, 'hub.workers')
+    local listed, workers = pcall(app.hub, 'hub.workers')
     for _, worker in ipairs(listed and workers.workers or {}) do
       if worker.spawn_id == draft.pending.spawn_id and type(worker.error) == 'string' then detail = ' (' .. worker.error .. ')' end
     end
@@ -216,7 +207,7 @@ local function render_start(args)
   -- (an explicit choice, choose_dir) replaces the text also after an edit. Saved submitted values
   -- are editor text already.
   fields[#fields + 1] = {id = 'dir', label = dir_label, kind = 'text', required = false, value = kept('dir', dir_text(draft.dir)),
-    browse = 'native', rev = count(draft.dir_rev)}
+    browse = 'native', rev = draft.dir_rev}
   for _, profile in ipairs(profiles) do options[#options + 1] = {value = profile.id, label = profile.name or profile.id} end
   local function offered(list, value)
     for _, o in ipairs(list) do if o.value == value then return value end end
@@ -302,9 +293,8 @@ local function build_request(args, kind, values)
   if next(named) then request.args = named end
   if type(values.title) == 'string' and values.title ~= '' then request.title = values.title end
   -- The submitted Directory field wins. Empty, or no field (an older renderer): the shown directory.
-  local draft = read_draft(draft_key(args))
-  local shown = draft.rev ~= '0' and type(draft.value.dir) == 'string' and draft.value.dir or nil
-  request.cwd = normalize_dir(values.dir or '', shown)
+  local draft = read_draft(view_id(args))
+  request.cwd = normalize_dir(values.dir or '', draft and draft.dir or nil)
   if values.placement == 'split' then
     if type(context.source_block_id) ~= 'string' or context.source_block_id == '' then fail('invalid_input', 'The form has no source pane') end
     request.placement.beside, request.placement.direction = context.source_block_id, 'right'
@@ -317,135 +307,93 @@ end
 -- finish sends the saved request and applies its result. hub.spawn is idempotent per key, so a
 -- repeat returns the same spawn. A pending outcome completes the view operation and records the
 -- pending start in the draft: an operation that stays unknown would hold every later operation of
--- this plugin in the hub's queue.
+-- this plugin in the hub's queue. Each write is one statement, so it needs no transaction.
 local function finish(args, op_key, request, values)
-  local result = hub('hub.spawn', request)
+  local result = app.hub('hub.spawn', request)
+  local id = view_id(args)
+  -- values is nil for Check again: the pending start saved them.
+  local saved = type(values) == 'table' and rex.json.encode(values) or nil
   if result.status == 'pending' then
-    return change_draft(args, function(d)
-      d.pending = {op_key = op_key, profile = request.profile, spawn_id = result.spawn_id}
-      if values then d.values = values end -- restored in the fields if the start fails
-      d.error, d.dismissed = nil, nil
-    end)
+    db.exec('INSERT INTO drafts (view_id, at, saved_values, pending_key, pending_profile, pending_spawn_id) VALUES (?, ?, ?, ?, ?, ?) ' ..
+      'ON CONFLICT (view_id) DO UPDATE SET at = excluded.at, saved_values = coalesce(excluded.saved_values, saved_values), ' ..
+      'pending_key = excluded.pending_key, pending_profile = excluded.pending_profile, pending_spawn_id = excluded.pending_spawn_id, error = NULL, dismissed = NULL',
+      id, os.time(), saved, op_key, request.profile, result.spawn_id)
+    return {}
   end
   if result.status == 'failed' then
     -- The earlier spawn definitely failed: Start returns, and a new submit uses a new key. The
-    -- fields show the submitted values again (Check again has none: the pending start saved them).
-    return change_draft(args, function(d)
-      d.pending, d.dismissed = nil, nil
-      if values then d.values = values end
-      d.error = result.error or 'The profile did not start'
-    end)
+    -- fields show the submitted values again.
+    db.exec('INSERT INTO drafts (view_id, at, saved_values, error) VALUES (?, ?, ?, ?) ' ..
+      'ON CONFLICT (view_id) DO UPDATE SET at = excluded.at, saved_values = coalesce(excluded.saved_values, saved_values), error = excluded.error, ' ..
+      'pending_key = NULL, pending_profile = NULL, pending_spawn_id = NULL, dismissed = NULL',
+      id, os.time(), saved, result.error or 'The profile did not start')
+    return {}
   end
-  local key = draft_key(args)
-  local draft = read_draft(key)
-  if draft.rev ~= '0' then pcall(hub, 'hub.store.batch', {ops = {{key = key, if_rev = draft.rev, delete = true}}}) end
+  db.exec('DELETE FROM drafts WHERE view_id = ?', id)
   return {close_form = true}
 end
 
-local function saved_request(op_key)
-  local saved = hub('hub.store.op', {key = op_key})
-  local request = saved.found and type(saved.result) == 'table' and saved.result.request
-  if type(request) ~= 'table' then fail('internal', 'Invalid saved start request') end
-  return request
+local function saved_start(op_key)
+  local row = db.first('SELECT request, saved_values FROM starts WHERE op_key = ?', op_key)
+  return row and {request = json(row.request), values = json(row.saved_values)}
 end
 
 -- start runs one submit. The exact request is saved before hub.spawn, so a retry with the same
 -- operation key sends the same request (hub.spawn refuses a changed request for a key).
 local function start(args, kind)
-  if type(args.operation_key) ~= 'string' or args.operation_key == '' then fail('invalid_input', 'An operation key is required') end
-  local op_key = 'start/' .. part(args.view_id) .. part(args.operation_key)
-  local request, values
-  local saved = hub('hub.store.op', {key = op_key})
-  if saved.found then
-    request = type(saved.result) == 'table' and saved.result.request
-    values = type(saved.result) == 'table' and saved.result.values
-  else
-    values = type(args.input) == 'table' and type(args.input.values) == 'table' and args.input.values or {}
-    request = build_request(args, kind, values)
-    local stored = hub('hub.store.batch', {ops = {}, op = {key = op_key, fingerprint = 'start-v1', result = {request = request, values = values}}})
-    if stored.op_exists then
-      request = type(stored.op_exists.result) == 'table' and stored.op_exists.result.request
-      values = type(stored.op_exists.result) == 'table' and stored.op_exists.result.values
-    end
+  local op_key = 'start/' .. part(view_id(args)) .. part(args.operation_key)
+  local saved = saved_start(op_key)
+  if not saved then
+    local values = type(args.input) == 'table' and type(args.input.values) == 'table' and args.input.values or {}
+    db.exec('INSERT INTO starts (op_key, view_id, at, request, saved_values) VALUES (?, ?, ?, ?, ?) ON CONFLICT (op_key) DO NOTHING',
+      op_key, args.view_id, os.time(), rex.json.encode(build_request(args, kind, values)), rex.json.encode(values))
+    saved = saved_start(op_key)
   end
-  if type(request) ~= 'table' then fail('internal', 'Invalid saved start request') end
-  return finish(args, op_key, request, type(values) == 'table' and values or nil)
+  if not saved or type(saved.request) ~= 'table' then fail('internal', 'Invalid saved start request') end
+  return finish(args, op_key, saved.request, type(saved.values) == 'table' and saved.values or nil)
 end
 
-local function view_action(args)
+local function view_action(ctx, args)
   local kind = kinds[args.route]
   context_of(args)
+  if type(args.operation_key) ~= 'string' or args.operation_key == '' then fail('invalid_input', 'An operation key is required') end
   local input = type(args.input) == 'table' and args.input or {}
   local id = type(input.item_id) == 'string' and input.item_id or ''
   if args.node_id == 'start' and args.action == 'start' then
     -- A replay of the pending start itself goes on (it sends the saved request); a new key cannot.
-    local draft = read_draft(draft_key(args))
-    local pending = draft.rev ~= '0' and draft.value.pending
-    if type(pending) == 'table' and pending.op_key ~= 'start/' .. part(args.view_id) .. part(tostring(args.operation_key)) then
+    local draft = read_draft(view_id(args))
+    if draft and draft.pending and draft.pending.op_key ~= 'start/' .. part(args.view_id) .. part(args.operation_key) then
       fail('conflict', 'A start is still pending; use Check again')
     end
     return start(args, kind)
   end
   if args.node_id == 'pending_actions' and args.action == 'check' then
-    local draft = read_draft(draft_key(args))
-    local pending = draft.rev ~= '0' and draft.value.pending
-    if type(pending) ~= 'table' or type(pending.op_key) ~= 'string' then return {} end
-    return finish(args, pending.op_key, saved_request(pending.op_key))
+    local draft = read_draft(view_id(args))
+    if not draft or not draft.pending then return {} end
+    local saved = saved_start(draft.pending.op_key)
+    if not saved or type(saved.request) ~= 'table' then fail('internal', 'Invalid saved start request') end
+    return finish(args, draft.pending.op_key, saved.request)
   end
   -- Dismiss clears only the pending start that the form showed (its spawn_id). A stale or absent
-  -- target changes nothing and writes nothing. The saved values and start record stay; the hub's
-  -- spawn does not change.
+  -- target changes nothing. The saved values and start record stay; the hub's spawn does not change.
   if args.node_id == 'dismiss_actions' and args.action == 'dismiss' and id:sub(1, 8) == 'dismiss:' then
-    local spawn_id = id:sub(9)
-    local function matches(d) return type(d.pending) == 'table' and d.pending.spawn_id == spawn_id end
-    local draft = read_draft(draft_key(args))
-    if draft.rev == '0' or not matches(draft.value) then return {} end
-    return change_draft(args, function(d)
-      if matches(d) then d.dismissed, d.pending = tostring(d.pending.profile), nil end
-    end)
+    db.exec('UPDATE drafts SET at = ?, dismissed = pending_profile, pending_key = NULL, pending_profile = NULL, pending_spawn_id = NULL ' ..
+      'WHERE view_id = ? AND pending_spawn_id = ?', os.time(), view_id(args), id:sub(9))
+    return {}
   end
   if args.node_id == 'dir_choices' then
-    if args.action == 'default' then
-      return change_draft(args, function(d) choose_dir(d, nil, nil) end)
-    elseif args.action == 'choose' and id:sub(1, 5) == 'tree:' then
-      return change_draft(args, function(d) choose_dir(d, id:sub(6), 'worktree') end)
-    end
+    if args.action == 'default' then return choose_dir(args, nil, nil) end
+    if args.action == 'choose' and id:sub(1, 5) == 'tree:' then return choose_dir(args, id:sub(6), 'worktree') end
   end
   fail('invalid_input', 'Unknown action ' .. tostring(args.action) .. ' on ' .. tostring(args.node_id))
 end
 
-local handlers = {
-  ['view.render'] = function(args) return {tree = render_start(args)} end,
-  ['view.action'] = view_action,
-  ['view.seen'] = function() return {} end,
-  -- A worker changed: a pending start's form shows its current state.
-  ['hub.changed'] = function(args)
-    if args.what == 'workers' then pcall(hub, 'hub.ui.invalidate') end
-    return {}
-  end,
-}
-local actions = {}
-for name in pairs(handlers) do actions[#actions + 1] = {name = name, kind = 'client', title = name,
-  args = {type = 'object', additionalProperties = true}} end
-rex.call('client.keymap', {actions = actions})
-hub('hub.register', {plugin = 'profiles', instance_id = instance_id, exports = {},
-  commands = {{id = 'start_agent', title = 'Start Agent…', description = 'Start an agent profile in a directory', keywords = {'agent', 'profile', 'claude', 'codex'}, route = '/forms/start-agent', action = 'hub.spawn'},
-    {id = 'start_accessory', title = 'Start Accessory…', description = 'Start a dev server, log tail or shell', keywords = {'accessory', 'profile', 'shell', 'server'}, route = '/forms/start-accessory', action = 'hub.spawn'}}})
--- Not in the main chunk: a catch there can split module-level locals (LazyRex
--- docs/rex-protocol.md, "Rex Lua runtime: rex do").
-rex.after(0, function() pcall(expire_drafts) end)
-rex.on('client_perform_requested', function(ctx, ev)
-  local ok, result = pcall(function()
-    if not ev.requester or ev.requester.client_id ~= hub_id then fail('refused', 'Only the hub calls profiles actions') end
-    local handler = handlers[ev.action]
-    if not handler then fail('not_supported', 'Unknown profiles action') end
-    local args = ev.args or {}
-    if ev.action ~= 'hub.changed' and ev.action ~= 'view.seen' and (not kinds[args.route] or args.user ~= 'user') then
-      fail('refused', 'Unknown profiles route or user')
-    end
-    return handler(args)
-  end)
-  if ok then rex.call('client.reply', {call_id = ev.call_id, result = result})
-  else rex.call('client.reply', {call_id = ev.call_id, error = type(result) == 'table' and result or {code = 'internal', message = tostring(result)}}) end
-end)
-rex.call('client.set_label', {label = 'lazyrex-plugin:profiles'})
+-- tx = false: a start calls hub.spawn (up to 10 s), longer than a handler transaction may stay open.
+for route in pairs(kinds) do app.view(route, {render = render_start, ['view.action'] = view_action}, {tx = false}) end
+app.command({id = 'start_agent', title = 'Start Agent…', description = 'Start an agent profile in a directory',
+  keywords = {'agent', 'profile', 'claude', 'codex'}, route = '/forms/start-agent', action = 'hub.spawn'})
+app.command({id = 'start_accessory', title = 'Start Accessory…', description = 'Start a dev server, log tail or shell',
+  keywords = {'accessory', 'profile', 'shell', 'server'}, route = '/forms/start-accessory', action = 'hub.spawn'})
+-- A worker changed: a pending start's form shows its current state.
+app.on('hub.changed', function(args) if args.what == 'workers' then app.refresh() end end)
+app.after(0, expire_drafts)

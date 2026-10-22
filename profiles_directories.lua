@@ -1,4 +1,4 @@
--- Read-only directory helpers for the Profiles form. Load this file by absolute path.
+-- Read-only directory helpers for the Profiles form. profiles.lua loads this file with require.
 -- Rex owns directory resolution. Git owns the worktree list. No helper changes either.
 local M = {}
 local function fail(code, message) error({code = code, message = message}) end

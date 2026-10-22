@@ -47,17 +47,17 @@ take up to 10 s, more than the handler transaction allows (gap 6).
 ## One-time import
 
 Drafts live for one day, but a pending start must survive the cutover (an open form keeps Check
-again, and Start stays hidden). The import runs once, in migration 2:
+again, and Start stays hidden). The import runs once, in migration 1:
 
 1. Scan `hub.store` prefix `draft/`. Insert each draft younger than one day.
-2. A start or a directory choice that the hub retries after the cutover has an operation key but
-   no SQL row. The handler then reads the legacy record by its known key (`hub.store.op` of
-   `start/...` or `draft-op/...`), so no scan of operation records is necessary. The key is
-   known at the retry: it is made from the view ID and the operation key.
+2. For each pending draft, read its start record by its known key (`hub.store.op`) and insert the
+   `starts` row. Other operation records are not imported. A start that the hub retries after the
+   cutover rebuilds its request from the imported draft and sends the same `hub.spawn` key, so it
+   cannot start twice (a changed request gets `conflict`). A retried directory choice or Dismiss
+   that runs twice changes nothing more than its first run did.
 3. Leave the hub.store records. They expire with no reader. A later commit can delete them.
 
-The import needs hub.store reads through `app.hub` (gap 1). Step 1 runs once, at the first start
-after migration 1 (a row in a `meta` table records it).
+The import needs hub.store reads through `app.hub` (gap 1). The import is part of migration 1, so it runs once.
 
 ## Delete
 
@@ -98,4 +98,14 @@ module pair: 2, 3, 4 (an SDK wrapper) and 7.
 6. A long handler: commit a row, call the hub, then write again, with the operation key's replay.
 7. A first render that writes a row, and a migration step that calls the hub.
 8. Test harness: SQL reads and writes of the plugin's database, and faults on `hub.sql.*`.
-9. Withdrawn: the legacy records are read by their known key (step 2 of the import).
+9. Withdrawn: the import reads each pending start by its known key, and needs no other record.
+
+## Status of the port
+
+- profiles.lua is ported on this branch (code first). It uses `app.view` (raw form views, `tx = false`),
+  `app.command`, `app.hub`, `app.on('hub.changed')` with `app.refresh`, and `app.db`.
+  Each write is one SQL statement (upserts), so it needs no handler transaction.
+- Lines: profiles.lua 451 before, 399 after. The one-time import is 32 of them, and a later commit
+  can delete it. The form tree and the request code (about 200 lines) do not change.
+- Untested: the hub has no `hub.sql` yet. The SQL statements were checked with sqlite3 3.54.0.
+  The tests move to `H.sql` when the hub branch lands.
