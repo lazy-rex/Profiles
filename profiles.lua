@@ -308,20 +308,15 @@ local function finish(args, op_key, request, values)
   local id = view_id(args)
   -- values is nil for Check again: the pending start saved them.
   local saved = type(values) == 'table' and rex.json.encode(values) or nil
-  if result.status == 'pending' then
-    db.exec('INSERT INTO drafts (view_id, at, saved_values, pending_key, pending_profile, pending_spawn_id) VALUES (?, ?, ?, ?, ?, ?) ' ..
-      'ON CONFLICT (view_id) DO UPDATE SET at = excluded.at, saved_values = coalesce(excluded.saved_values, saved_values), ' ..
-      'pending_key = excluded.pending_key, pending_profile = excluded.pending_profile, pending_spawn_id = excluded.pending_spawn_id, error = NULL, dismissed = NULL',
-      id, os.time(), saved, op_key, request.profile, result.spawn_id)
-    return {}
-  end
-  if result.status == 'failed' then
-    -- The earlier spawn definitely failed: Start returns, and a new submit uses a new key. The
-    -- fields show the submitted values again.
-    db.exec('INSERT INTO drafts (view_id, at, saved_values, error) VALUES (?, ?, ?, ?) ' ..
+  -- Pending: the draft names the start. Failed: the earlier spawn definitely failed, so Start
+  -- returns with the error, and a new submit uses a new key. Both show the submitted values again.
+  local pending = result.status == 'pending'
+  if pending or result.status == 'failed' then
+    db.exec('INSERT INTO drafts (view_id, at, saved_values, error, pending_key, pending_profile, pending_spawn_id) VALUES (?, ?, ?, ?, ?, ?, ?) ' ..
       'ON CONFLICT (view_id) DO UPDATE SET at = excluded.at, saved_values = coalesce(excluded.saved_values, saved_values), error = excluded.error, ' ..
-      'pending_key = NULL, pending_profile = NULL, pending_spawn_id = NULL, dismissed = NULL',
-      id, os.time(), saved, result.error or 'The profile did not start')
+      'pending_key = excluded.pending_key, pending_profile = excluded.pending_profile, pending_spawn_id = excluded.pending_spawn_id, dismissed = NULL',
+      id, os.time(), saved, not pending and (result.error or 'The profile did not start') or nil,
+      pending and op_key or nil, pending and request.profile or nil, pending and result.spawn_id or nil)
     return {}
   end
   db.exec('DELETE FROM drafts WHERE view_id = ?', id)
