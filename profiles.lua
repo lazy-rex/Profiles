@@ -350,7 +350,9 @@ app.command({id = 'start_agent', title = 'Start Agent…', description = 'Start 
   keywords = {'agent', 'profile', 'claude', 'codex'}, route = '/forms/start-agent', action = 'hub.spawn'})
 app.command({id = 'start_accessory', title = 'Start Accessory…', description = 'Start a dev server, log tail or shell',
   keywords = {'accessory', 'profile', 'shell', 'server'}, route = '/forms/start-accessory', action = 'hub.spawn'})
--- A worker changed: a pending start's form shows its current state.
+-- Read tracking: a render also reads hub.profiles, hub.workers and Git, so the SDK renders the form
+-- again after each SQL commit. The plugin keeps no Lua state that a render shows. A worker change
+-- is not a commit: the listener renders a pending start's form again with its current state.
 app.on('hub.changed', function(args) if args.what == 'workers' then app.refresh() end end)
 -- Drafts expire at start and each hour (a render only reads).
 app.after(0, expire_drafts)

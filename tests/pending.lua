@@ -72,9 +72,18 @@ test('a lost create: the form shows the pending start, refuses a second start, a
   local after = workers_of(src.session, 'logtail')
   expect(after).to_have_length(1)
   expect(after[1].spawn_id).to_be(pending[1].spawn_id)
-  -- After the first-request window (15 s) the hub reports why the outcome is unknown.
+  -- After the first-request window (15 s) the hub reports why the outcome is unknown. The worker
+  -- is not in SQL: the plugin's worker listener renders the form again (an invalidate), and the
+  -- shown snapshot updates with no forced render.
+  local function invalidates()
+    for _, r in ipairs(renders('profiles')) do if r.view_id == v.id then return r.causes.invalidate or 0 end end
+    return 0
+  end
+  local base = invalidates()
   wait('the unknown outcome in the form', function()
-    return node(v:render(), 'pending').text:find('(outcome unknown: no pane found)', 1, true) ~= nil
+    local snap = v:get()
+    local shown = snap and snap.tree and node(snap.tree, 'pending')
+    return shown and shown.text:find('(outcome unknown: no pane found)', 1, true) ~= nil and invalidates() > base
   end, 30)
 end)
 
