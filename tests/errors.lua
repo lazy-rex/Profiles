@@ -19,8 +19,7 @@ test('a refused start fails with the hub code and message; the next start runs',
 end)
 
 -- A start whose directory does not exist cannot succeed. On every path it must fail at once with
--- the hub's refusal, and start nothing. (On an older hub, such a start was retried thousands of
--- times as "outcome unknown: unavailable", and the form never ended.)
+-- the hub's refusal, and start nothing.
 local alice = agent('alice')
 local function values(over)
   local v = {dir = '', profile = 'logtail', title = '', placement = 'tab'}

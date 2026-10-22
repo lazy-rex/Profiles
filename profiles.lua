@@ -288,8 +288,8 @@ local function build_request(ctx, args, kind, values)
   end
   if next(named) then request.args = named end
   if type(values.title) == 'string' and values.title ~= '' then request.title = values.title end
-  -- The submitted Directory field wins. Empty, or no field (an older renderer): the shown directory.
-  request.cwd = normalize_dir(values.dir or '', (form_dir(ctx, read_draft(view_id(args)))))
+  -- The submitted Directory field wins. Empty: the shown directory.
+  request.cwd = normalize_dir(values.dir, (form_dir(ctx, read_draft(view_id(args)))))
   if values.placement == 'split' then
     if type(context.source_block_id) ~= 'string' or context.source_block_id == '' then fail('invalid_input', 'The form has no source pane') end
     request.placement.beside, request.placement.direction = context.source_block_id, 'right'

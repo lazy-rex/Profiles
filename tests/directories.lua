@@ -1,6 +1,6 @@
--- Ported from the Node test profiles-directories-lab.mjs: the directory helper
--- (profiles_directories.lua) in Rex Lua: the decoder of a real terminal.pwd report (OSC 7), and real Git
--- worktrees. The hub reads the report when it opens a form; the form tests cover that path.
+-- The directory helper (profiles_directories.lua) in Rex Lua: the decoder of a real terminal.pwd
+-- report (OSC 7), and real Git worktrees. The hub reads the report when it opens a form; the form
+-- tests cover that path.
 -- The runner loads the helper by its absolute path.
 
 local plugin_dir = H.args.file:match('^(.*)/tests/[^/]*$')
@@ -20,7 +20,7 @@ local function git(...) return run({'git', ...}) end
 local function mkdir(path) run({'mkdir', '-p', path}) end
 -- real is the physical path (/tmp is /private/tmp on macOS), as Git reports it.
 local function real(path) return (run({'/bin/sh', '-c', 'cd "$1" && pwd -P', 'sh', path}):gsub('\n$', '')) end
--- file_uri percent-encodes a path the way a shell's OSC 7 report does (Node pathToFileURL).
+-- file_uri percent-encodes a path the way a shell's OSC 7 report does.
 local function file_uri(host, path)
   return 'file://' .. host .. path:gsub('[^%w/%-%._~]', function(c) return string.format('%%%02X', c:byte()) end)
 end

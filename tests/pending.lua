@@ -1,7 +1,6 @@
 -- Pending and failed starts on the real hub, with the hub's spawn-create faults (docs/testing.md,
 -- "Faults"). A UI start's hub.spawn key is "profiles-start/<view operation key>", so each fault
--- names the operation key that the test chooses. Ported from the pending parts of
--- profiles-plugin.mjs, which scripted these outcomes with a mock hub.
+-- names the operation key that the test chooses.
 local F = assert(loadfile(H.args.file:match('^(.*)/[^/]*$') .. '/support/fixture.lua'))()(H)
 local alice = agent('alice')
 
@@ -237,7 +236,7 @@ test('Dismiss: a stale or absent target changes nothing and writes nothing', fun
   for _, w in ipairs(workers_of(src.session, 'logtail')) do if w.spawn_id ~= first then second = w.spawn_id end end
   expect(second).to_be_truthy()
   d = F.draft(v.id)
-  -- A Dismiss of the old target (a new key, as from an older tree) leaves the newer start pending.
+  -- A Dismiss of the old target (a new key, as from a stale tree) leaves the newer start pending.
   dismiss(v, first, 'stale-op-2')
   expect(F.draft(v.id)).to_equal(d)
   local tree = v:render()

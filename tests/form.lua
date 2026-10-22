@@ -1,6 +1,5 @@
--- Ported from the Node test profiles-plugin.mjs (the parts without a pending start): the Start
--- form's tree, its draft, the Directory field's text, old drafts and a broken profile file, on
--- the real hub's view path. The pending start tests need the hub's spawn-create fault point.
+-- The Start form on the real hub's view path: its tree, its draft, the Directory field's text,
+-- draft expiry and a broken profile file. The pending start tests are in pending.lua.
 local F = assert(loadfile(H.args.file:match('^(.*)/[^/]*$') .. '/support/fixture.lua'))()(H)
 local alice = agent('alice')
 

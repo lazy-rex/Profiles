@@ -269,7 +269,7 @@ test('stop: any agent stops any worker; a repeated stop is safe; a pending start
   before = F.ids(alice)
   succeeded(v:action('start', 'start', {values = start_values({dir = F.field(tree, 'dir').value, profile = 'fake_agent'})}))
   local users_agent = F.new_worker(alice, before)
-  -- The parent still names who started each worker; it no longer limits stop.
+  -- The parent still names who started each worker; it does not limit stop.
   local cases = {{own_agent.spawn_id, 'alice'}, {own_acc.spawn_id, 'alice'}, {bobs_agent.spawn_id, 'bob'},
     {bobs_acc.spawn_id, 'bob'}, {users_acc.spawn_id, 'user'}, {users_agent.spawn_id, 'user'}}
   for _, c in ipairs(cases) do
