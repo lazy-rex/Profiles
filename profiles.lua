@@ -254,20 +254,13 @@ end
 local function normalize_dir(text, fallback)
   if type(text) ~= 'string' or text == '' then return fallback end
   local value = text:match("^'([^']*)'$")
+  -- One gsub, not a list of characters: Rex Lua table.concat fails above 2559 items (LazyRex
+  -- docs/rex-protocol.md).
   if not value then
-    local out, i = {}, 1
-    while i <= #text do
-      local c = text:sub(i, i)
-      if c == '\\' then
-        if i == #text then fail('invalid_input', 'The directory ends with a lone backslash: ' .. text) end
-        out[#out + 1] = text:sub(i + 1, i + 1)
-        i = i + 2
-      else
-        out[#out + 1] = c
-        i = i + 1
-      end
-    end
-    value = table.concat(out)
+    value = text:gsub('\\(.?)', function(c)
+      if c == '' then fail('invalid_input', 'The directory ends with a lone backslash: ' .. text) end
+      return c
+    end)
   end
   if value == '~' or value:sub(1, 2) == '~/' then value = (os.getenv('HOME') or '') .. value:sub(2) end
   while #value > 1 and value:sub(-1) == '/' do value = value:sub(1, -2) end
