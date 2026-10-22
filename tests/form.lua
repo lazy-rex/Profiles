@@ -31,7 +31,8 @@ test('shared arg fields start empty with every label; the Directory field offers
   expect(task.label).to_be("Task / Goal (empty: the profile's default)")
   local dir = F.field(tree, 'dir')
   expect({dir.value, dir.browse, dir.kind, dir.rev}).to_equal({F.sub, 'native', 'text', 0})
-  expect(F.draft(v.id).dir).to_be(F.sub)
+  -- A render only reads: the hub froze the source directory when it opened the form.
+  expect(F.draft(v.id)).to_be(nil)
   local offered = {}
   for _, o in ipairs(F.field(tree, 'profile').options) do offered[#offered + 1] = o.value end
   expect(offered).to_equal({'fake_agent', 'beta'})
@@ -52,6 +53,16 @@ test('the first render freezes the source directory; an empty field starts there
   -- A new form reads the source pane again.
   local _, again = F.form(s, 'start_accessory')
   expect(F.field(again, 'dir').value).to_be(F.deeper)
+end)
+
+test('a source pane that reports no directory: the form says why, and each profile uses its own', function()
+  local s = F.source(nil, true)
+  local v, tree = F.form(s, 'start_accessory')
+  expect(node(tree, 'directory_note').text).to_match('no directory')
+  local dir = F.field(tree, 'dir')
+  expect({dir.value, dir.label}).to_equal({'', "Directory (empty: each profile's own directory)"})
+  expect(node(tree, 'dir_choices')).to_be(nil)
+  expect(F.draft(v.id)).to_be(nil)
 end)
 
 test('an ordinary render keeps the rev; each explicit choice increments it', function()
@@ -141,7 +152,7 @@ test('the move to SQL imports the hub.store drafts; a pending start keeps Check 
   local spawn_id = d.pending_spawn_id
   expect(spawn_id).to_be_truthy()
   -- The older version's records. Its drafts can hold the fields of the older in-form browser.
-  write({{key = 'draft/' .. v.id, value = {at = d.at, dir = d.dir, dir_source = d.dir_source, dir_rev = 0, browse = F.deeper, prefix = 'de',
+  write({{key = 'draft/' .. v.id, value = {at = d.at, dir = F.sub, dir_source = 'pwd', dir_rev = 0, browse = F.deeper, prefix = 'de',
       values = rex.json.decode(d.saved_values), pending = {op_key = d.pending_key, profile = 'logtail', spawn_id = spawn_id}}},
     {key = 'draft/plain', value = {at = os.time() - 3600, dir = F.wt, dir_source = 'worktree', dir_rev = 2, error = 'it failed'}},
     {key = 'draft/old', value = {at = os.time() - 2 * 24 * 3600, dir = F.sub}}})
@@ -183,17 +194,11 @@ end)
 -- stale writes a draft that is two days old, as a form that never ended leaves it.
 local function stale(id) sql_write('INSERT INTO drafts (view_id, at, dir) VALUES (?, ?, ?)', {id, os.time() - 2 * 24 * 3600, F.sub}) end
 
-test('the plugin expires old drafts when it starts, after its main chunk', function()
-  stale('stale-at-start')
-  hub:restart()
-  wait('the stale draft expires at start', function() return F.draft('stale-at-start') == nil end, 15)
-end)
-
-test('a draft whose form never ended expires after a day', function()
+test('a draft whose form never ended expires after a day, when the plugin starts', function()
   stale('stale-view')
   sql_write('INSERT INTO drafts (view_id, at, dir) VALUES (?, ?, ?)', {'fresh-view', os.time() - 3600, F.sub})
-  F.form(src, 'start_accessory') -- a first render writes a draft and expires old ones
-  expect(F.draft('stale-view')).to_be(nil)
+  hub:restart()
+  wait('the stale draft expires at start', function() return F.draft('stale-view') == nil end, 15)
   expect(F.draft('fresh-view')).to_be_truthy()
 end)
 

@@ -17,7 +17,7 @@ local draft_ttl = 24 * 3600 -- a draft whose form never ended expires after a da
 local schema = {
   'CREATE TABLE starts (op_key TEXT PRIMARY KEY, view_id TEXT NOT NULL, at INTEGER NOT NULL, request TEXT NOT NULL, saved_values TEXT)',
   'CREATE TABLE drafts (view_id TEXT PRIMARY KEY, at INTEGER NOT NULL, dir TEXT, dir_source TEXT, dir_rev INTEGER NOT NULL DEFAULT 0, ' ..
-    'note TEXT, error TEXT, dismissed TEXT, saved_values TEXT, pending_key TEXT, pending_profile TEXT, pending_spawn_id TEXT)',
+    'error TEXT, dismissed TEXT, saved_values TEXT, pending_key TEXT, pending_profile TEXT, pending_spawn_id TEXT)',
   'CREATE INDEX drafts_at ON drafts (at)',
   'CREATE INDEX starts_at ON starts (at)',
 }
@@ -86,8 +86,8 @@ local function import_drafts()
         else
           p = nil
         end
-        db.exec('INSERT INTO drafts (view_id, at, dir, dir_source, dir_rev, note, error, dismissed, saved_values, pending_key, pending_profile, pending_spawn_id) ' ..
-          'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', key:sub(7), d.at, d.dir, d.dir_source, tonumber(d.dir_rev) or 0, d.note, d.error,
+        db.exec('INSERT INTO drafts (view_id, at, dir, dir_source, dir_rev, error, dismissed, saved_values, pending_key, pending_profile, pending_spawn_id) ' ..
+          'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', key:sub(7), d.at, d.dir, d.dir_source, tonumber(d.dir_rev) or 0, d.error,
           d.dismissed, type(d.values) == 'table' and rex.json.encode(d.values) or nil, p and p.op_key, p and tostring(p.profile), p and p.spawn_id)
       end
     end
@@ -97,19 +97,14 @@ end
 schema[#schema + 1] = import_drafts
 app.db.migrate {function() for _, step in ipairs(schema) do if type(step) == 'function' then step() else db.exec(step) end end end}
 
--- The first render records the default directory, so the start uses the directory that the form
--- showed, also when the source pane changes directory later.
-local function ensure_draft(args)
-  local id = view_id(args)
-  local draft = read_draft(id)
-  if draft then return draft end
-  local dir, source, note
-  local ok, found = pcall(dirs.source_directory, context_of(args), nil)
-  if ok and found then dir, source = found.path, found.source
-  elseif not ok then note = type(found) == 'table' and found.message or tostring(found) end
-  db.exec('INSERT INTO drafts (view_id, at, dir, dir_source, note) VALUES (?, ?, ?, ?, ?) ON CONFLICT (view_id) DO NOTHING', id, os.time(), dir, source, note)
-  expire_drafts()
-  return read_draft(id)
+-- form_dir answers the directory that the form shows. The hub reads the source pane's directory
+-- once, when it opens the form, and each render and action gets that report (ctx.source.pwd, or
+-- ctx.source.pwd_error; LazyRex docs/hub.md). So the form keeps the directory that it first showed,
+-- also when the source pane changes directory later. An explicit choice or an imported draft wins.
+local function form_dir(ctx, draft)
+  if draft and ((draft.dir_rev or 0) > 0 or draft.dir_source) then return draft.dir, draft.dir_source end
+  local path = dirs.pwd_path(ctx.source and ctx.source.pwd)
+  return path, path and 'pwd' or nil
 end
 
 -- The draft holds a raw path; the Directory field holds editor text, which normalize_dir decodes.
@@ -127,11 +122,11 @@ local function choose_dir(args, dir, source)
   return {}
 end
 
-local function directory_nodes(draft, nodes)
-  if draft.note then nodes[#nodes + 1] = {id = 'directory_note', type = 'widget', text = draft.note} end
+local function directory_nodes(dir, note, nodes)
+  if note then nodes[#nodes + 1] = {id = 'directory_note', type = 'widget', text = note} end
   local items = {}
-  if draft.dir then
-    local ok, trees = pcall(dirs.worktrees, draft.dir)
+  if dir then
+    local ok, trees = pcall(dirs.worktrees, dir)
     if ok and trees and #trees.list > 1 then
       for _, tree in ipairs(trees.list) do
         local name = tree.branch or (tree.detached and 'detached' or '?')
@@ -147,7 +142,8 @@ end
 local function render_start(ctx, args)
   local kind = kinds[args.route]
   local context = context_of(args)
-  local draft = ensure_draft(args)
+  local draft = read_draft(view_id(args)) or {}
+  local dir, dir_source = form_dir(ctx, draft)
   local title = kind == 'agent' and 'Start Agent' or 'Start Accessory'
   local nodes = {}
   if draft.pending then
@@ -191,7 +187,7 @@ local function render_start(ctx, args)
       '. Dismiss does not stop or remove the worker. A pane may still appear. ' ..
       'Starting again can create a duplicate.'}
   end
-  directory_nodes(draft, nodes)
+  directory_nodes(dir, ctx.source and ctx.source.pwd_error, nodes)
   local options, fields, seen, order = {}, {}, {}, {}
   -- After a failed pending start, the fields show the values that the user submitted.
   local saved = type(draft.values) == 'table' and draft.values or {}
@@ -200,13 +196,13 @@ local function render_start(ctx, args)
   -- which types the chosen path into the field (pane.insert_path). When the app refuses the browser
   -- (no_app, ambiguous_app), the user types the path.
   local dir_label = 'Directory'
-  if draft.dir_source == 'pwd' then dir_label = dir_label .. ' (from the source pane)' end
-  if not draft.dir then dir_label = dir_label .. " (empty: each profile's own directory)" end
+  if dir_source == 'pwd' then dir_label = dir_label .. ' (from the source pane)' end
+  if not dir then dir_label = dir_label .. " (empty: each profile's own directory)" end
   -- The renderer takes a changed value while the user has not edited the field. A changed rev
   -- (an explicit choice, choose_dir) replaces the text also after an edit. Saved submitted values
   -- are editor text already.
-  fields[#fields + 1] = {id = 'dir', label = dir_label, kind = 'text', required = false, value = kept('dir', dir_text(draft.dir)),
-    browse = 'native', rev = draft.dir_rev}
+  fields[#fields + 1] = {id = 'dir', label = dir_label, kind = 'text', required = false, value = kept('dir', dir_text(dir)),
+    browse = 'native', rev = draft.dir_rev or 0}
   for _, profile in ipairs(profiles) do options[#options + 1] = {value = profile.id, label = profile.name or profile.id} end
   local function offered(list, value)
     for _, o in ipairs(list) do if o.value == value then return value end end
@@ -269,7 +265,7 @@ local function normalize_dir(text, fallback)
 end
 
 -- build_request turns the submitted values into one hub.spawn request.
-local function build_request(args, kind, values)
+local function build_request(ctx, args, kind, values)
   local context = context_of(args)
   local profile
   for _, p in ipairs(profiles_of(kind)) do if p.id == values.profile then profile = p end end
@@ -285,8 +281,7 @@ local function build_request(args, kind, values)
   if next(named) then request.args = named end
   if type(values.title) == 'string' and values.title ~= '' then request.title = values.title end
   -- The submitted Directory field wins. Empty, or no field (an older renderer): the shown directory.
-  local draft = read_draft(view_id(args))
-  request.cwd = normalize_dir(values.dir or '', draft and draft.dir or nil)
+  request.cwd = normalize_dir(values.dir or '', (form_dir(ctx, read_draft(view_id(args)))))
   if values.placement == 'split' then
     if type(context.source_block_id) ~= 'string' or context.source_block_id == '' then fail('invalid_input', 'The form has no source pane') end
     request.placement.beside, request.placement.direction = context.source_block_id, 'right'
@@ -332,13 +327,13 @@ end
 
 -- start runs one submit. The exact request is saved before hub.spawn, so a retry with the same
 -- operation key sends the same request (hub.spawn refuses a changed request for a key).
-local function start(args, kind)
+local function start(ctx, args, kind)
   local op_key = 'start/' .. part(view_id(args)) .. part(args.operation_key)
   local saved = saved_start(op_key)
   if not saved then
     local values = type(args.input) == 'table' and type(args.input.values) == 'table' and args.input.values or {}
     db.exec('INSERT INTO starts (op_key, view_id, at, request, saved_values) VALUES (?, ?, ?, ?, ?) ON CONFLICT (op_key) DO NOTHING',
-      op_key, args.view_id, os.time(), rex.json.encode(build_request(args, kind, values)), rex.json.encode(values))
+      op_key, args.view_id, os.time(), rex.json.encode(build_request(ctx, args, kind, values)), rex.json.encode(values))
     saved = saved_start(op_key)
   end
   if not saved or type(saved.request) ~= 'table' then fail('internal', 'Invalid saved start request') end
@@ -357,7 +352,7 @@ local function view_action(ctx, args)
     if draft and draft.pending and draft.pending.op_key ~= 'start/' .. part(args.view_id) .. part(args.operation_key) then
       fail('conflict', 'A start is still pending; use Check again')
     end
-    return start(args, kind)
+    return start(ctx, args, kind)
   end
   if args.node_id == 'pending_actions' and args.action == 'check' then
     local draft = read_draft(view_id(args))
@@ -388,4 +383,6 @@ app.command({id = 'start_accessory', title = 'Start Accessory…', description =
   keywords = {'accessory', 'profile', 'shell', 'server'}, route = '/forms/start-accessory', action = 'hub.spawn'})
 -- A worker changed: a pending start's form shows its current state.
 app.on('hub.changed', function(args) if args.what == 'workers' then app.refresh() end end)
+-- Drafts expire at start and each hour (a render only reads).
 app.after(0, expire_drafts)
+app.every(3600, expire_drafts)

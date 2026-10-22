@@ -102,10 +102,15 @@ module pair: 2, 3, 4 (an SDK wrapper) and 7.
 
 ## Status of the port
 
+- Render reads only (sdk/lua eb9654d). The hub freezes the source pane's report at the open
+  (hub/form-source-pwd d407808, `ctx.source.pwd` and `ctx.source.pwd_error` from sdk/lua 0b5908f).
+  The draft row now exists only after an action. Drafts expire at start and each hour.
+  profiles_directories.lua lost its own pane read: 116 -> 83 lines.
+
 - profiles.lua is ported on this branch (code first). It uses `app.view` (raw form views, `tx = false`),
   `app.command`, `app.hub`, `app.on('hub.changed')` with `app.refresh`, and `app.db`.
   Each write is one SQL statement (upserts), so it needs no handler transaction.
-- Lines: profiles.lua 451 before, 398 after. The one-time import is 32 of them, and a later commit
+- Lines: profiles.lua 451 before, 388 after; with the helper, 567 before, 471 after. The one-time import is 32 of them, and a later commit
   can delete it. The form tree and the request code (about 200 lines) do not change.
 - Tested: all 7 test files pass (50 tests, and the parity sweep of each file) on LazyRex hub/sql-r2 c840c92 with
   sdk/lua 62dde56 in a lab. The tests read the tables with `sql()`, and the lost commit reply is an

@@ -13,7 +13,8 @@ Check this repository out next to LazyRex, and add the plugin to the hub config:
 The plugin uses the LazyRex Plugin SDK (`"sdk": "0"` in `lazyrex.json`), and it loads its other
 files from its own directory, so keep them together. Its data is in its own SQL database (hub.sql):
 the table `drafts` (one row for each open form) and the table `starts` (the exact `hub.spawn`
-request of each submit). Drafts expire after a day.
+request of each submit). Drafts expire after a day. The hub reads the source pane's directory once,
+when it opens the form (LazyRex form context `source_pwd`), so a render only reads.
 
 ## Agents
 
@@ -49,7 +50,7 @@ cd ../../Profiles && lazyrex-hub test
 - restart.lua: a pending start across a hub stop and a crash.
 - errors.lua: a hub refusal ends the operation. A missing directory fails at once: the profile's own
   (form and hub.spawn), a shown directory removed before Start, and `~` text (form).
-- directories.lua: the directory helper (OSC 7 and Git worktrees).
+- directories.lua: the directory helper: the decoder of an OSC 7 report, and Git worktrees.
 
 `tests/support/fixture.lua` is the shared lab fixture: a Git repository and worktree, a source
 pane that reports its directory, and harmless profiles. `lazyrex.json` is the test manifest.

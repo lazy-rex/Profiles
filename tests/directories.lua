@@ -1,6 +1,7 @@
 -- Ported from the Node test profiles-directories-lab.mjs: the directory helper
--- (profiles_directories.lua) in Rex Lua, with a real source pane (OSC 7), real terminal.pwd and
--- real Git worktrees. The runner loads the helper as the plugin does: loadfile by absolute path.
+-- (profiles_directories.lua) in Rex Lua: the decoder of a real terminal.pwd report (OSC 7), and real Git
+-- worktrees. The hub reads the report when it opens a form; the form tests cover that path.
+-- The runner loads the helper by its absolute path.
 
 local plugin_dir = H.args.file:match('^(.*)/tests/[^/]*$')
 local dirs = assert(loadfile(plugin_dir .. '/profiles_directories.lua'))()
@@ -41,41 +42,23 @@ wait('the source pane reports its directory', function()
   return r and r.pwd and r.pwd ~= ''
 end)
 
--- with_pwd runs fn while terminal.pwd answers report (the pane's report is fixed).
-local function with_pwd(report, fn)
-  local call = rex.call
-  rex.call = function(method, args)
-    if method == 'com.superlogical.terminal.pwd' then return {pwd = report} end
-    return call(method, args)
-  end
-  local ok, result = pcall(fn)
-  rex.call = call
-  if not ok then error(result, 0) end
-  return result
-end
-
-test('the source directory: OSC 7 from a foreign session, percent decoding exactly once', function()
-  expect(dirs.source_directory(context, '/unused')).to_equal({path = source, source = 'pwd'})
+test('a real OSC 7 report decodes, percent decoding exactly once', function()
+  local r = rex.call('com.superlogical.terminal.pwd', {session_id = context.session_id, block_id = context.source_block_id, args = {}})
+  expect(dirs.pwd_path(r.pwd)).to_be(source)
 end)
 
 test('local hostname and localhost file URIs', function()
   local host = run({'hostname'}):gsub('[\r\n]+$', '')
   for _, h in ipairs({host, 'localhost'}) do
-    expect(with_pwd(file_uri(h, source), function() return dirs.source_directory(context, nil) end).path).to_be(source)
+    expect(dirs.pwd_path(file_uri(h, source))).to_be(source)
   end
 end)
 
-test('missing, remote, malformed and NUL reports use the explicit profile fallback', function()
+test('missing, remote, malformed and NUL reports give no directory', function()
   for _, report in ipairs({'', 'file://remote.invalid/tmp', 'file:///bad%xx', 'file:///bad%00', 'file:///tmp?query'}) do
-    expect(with_pwd(report, function() return dirs.source_directory(context, source) end), report).to_equal({path = source, source = 'profile'})
+    expect(dirs.pwd_path(report), report).to_be(nil)
   end
-  expect(dirs.source_directory({}, nil)).to_be(nil)
-end)
-
-test('a stale source block fails instead of silently changing directory', function()
-  expect_error(function()
-    dirs.source_directory({session_id = context.session_id, source_block_id = 'block:missing'}, source)
-  end)
+  expect(dirs.pwd_path(nil)).to_be(nil)
 end)
 
 local base = real(root)

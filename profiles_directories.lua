@@ -8,25 +8,6 @@ local function text(value, name)
   end
   return value
 end
-local function block_call(context, method, args)
-  if type(context) ~= 'table' or type(context.session_id) ~= 'string' or context.session_id == ''
-    or type(context.source_block_id) ~= 'string' or context.source_block_id == '' then
-    fail('source_unavailable', 'The source pane is unavailable. Open Start from a terminal pane.')
-  end
-  -- A Lua plugin can use this source session even when its own pane is in another session.
-  local attached, err = rex.call('session.attach', {session_id = context.session_id, event_scope = 'session'})
-  if not attached then
-    fail(type(err) == 'table' and err.code or 'unavailable',
-      type(err) == 'table' and err.message or tostring(err or 'Could not attach the source session'))
-  end
-  local result, call_error = rex.call('com.superlogical.terminal.' .. method,
-    {session_id = context.session_id, block_id = context.source_block_id, args = args or {}})
-  if type(result) ~= 'table' then
-    fail(type(call_error) == 'table' and call_error.code or 'unavailable',
-      type(call_error) == 'table' and call_error.message or tostring(call_error or 'Could not read the source pane'))
-  end
-  return result
-end
 
 local hostname
 local function local_host(host)
@@ -38,7 +19,8 @@ local function local_host(host)
   end
   return hostname ~= '' and host == hostname
 end
-local function pwd_path(uri)
+-- pwd_path decodes a terminal.pwd report (an OSC 7 file URI) to a local path, or nil.
+function M.pwd_path(uri)
   if type(uri) ~= 'string' then return nil end
   local host, path = uri:match('^file://([^/]*)(/.*)$')
   if not host or not local_host(host) or path:find('[?#]') then return nil end
@@ -47,21 +29,6 @@ local function pwd_path(uri)
   path = path:gsub('%%([%da-fA-F][%da-fA-F])', function(hex) return string.char(tonumber(hex, 16)) end)
   if path:find('%z') then return nil end
   return path
-end
-
--- No source report: use the selected profile's cwd. Nil leaves the default to hub.spawn.
--- An RPC failure is an error, not permission to silently choose a different directory.
-function M.source_directory(context, profile_cwd)
-  if type(context) == 'table' and type(context.source_block_id) == 'string' and context.source_block_id ~= '' then
-    local path = pwd_path(block_call(context, 'pwd').pwd)
-    if path then return {path = path, source = 'pwd'} end
-  end
-  if profile_cwd ~= nil and profile_cwd ~= '' then
-    text(profile_cwd, 'Profile directory')
-    if profile_cwd:sub(1, 1) ~= '/' then fail('invalid_input', 'Profile directory must be absolute') end
-    return {path = profile_cwd, source = 'profile'}
-  end
-  return nil
 end
 
 -- Do not inherit a surrounding agent's Git repository or injected Git configuration.

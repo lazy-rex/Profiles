@@ -61,17 +61,18 @@ return function(H)
   end
 
   -- source makes a session whose one pane reports a directory with OSC 7. The pane reads paths on
-  -- its input and reports each one, so F.cd changes the reported directory later.
+  -- its input and reports each one, so F.cd changes the reported directory later. quiet = true: the
+  -- pane reports no directory.
   local n = 0
-  function F.source(dir)
+  function F.source(dir, quiet)
     n = n + 1
-    local script = 'stty -echo; report() { printf "\\033]7;file://localhost%s\\007" "$1"; }; report "$0"; while read -r p; do report "$p"; done'
+    local script = quiet and 'exec sleep 100000' or 'stty -echo; report() { printf "\\033]7;file://localhost%s\\007" "$1"; }; report "$0"; while read -r p; do report "$p"; done'
     local s, err = rex.call('session.create', {label = 'profiles-source-' .. n, initial_windows = {{window_label = 'src',
       layout = {block = {flavor = 'com.superlogical.terminal.shell', label = 'src', options = {command = {'/bin/sh', '-c', script, dir or F.sub}, login = false}}}}}})
     if not s then error('session.create: ' .. H.show(err), 0) end
     rex.call('session.attach', {session_id = s.session_id, event_scope = 'session'})
     local src = {session = s.session_id, window = s.initial_windows[1].window_id, block = s.initial_windows[1].block_ids[1]}
-    F.wait_pwd(src, dir or F.sub)
+    if not quiet then F.wait_pwd(src, dir or F.sub) end
     return src
   end
   function F.wait_pwd(src, dir)
