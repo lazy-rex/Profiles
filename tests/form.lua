@@ -135,58 +135,6 @@ test('an unknown action is refused', function()
   expect(op.error.message).to_match('Unknown action')
 end)
 
--- The move from hub.store to SQL: migration 1 imports every saved start request, and the drafts
--- younger than a day. The test makes a real pending start, writes it back as the older
--- plugin version stored it, empties the database and starts the plugin again.
-test('the move to SQL imports the hub.store drafts and saved starts; a pending start keeps Check again', function()
-  local s = F.source()
-  local v = F.form(s, 'start_accessory')
-  fault({point = 'spawn-create', mode = 'drop', op = 'profiles-start/import-1'})
-  succeeded(v:action('start', 'start', {values = values({title = 'Mine'})}, 'import-1'))
-  local d = F.draft(v.id)
-  local start = sql('SELECT * FROM starts WHERE op_key = ?', {d.pending_key})[1]
-  local spawn_id = d.pending_spawn_id
-  expect(spawn_id).to_be_truthy()
-  -- The older version's records. Its drafts can hold the fields of the older in-form browser.
-  write({{key = 'draft/' .. v.id, value = {at = d.at, dir = F.sub, dir_source = 'pwd', dir_rev = 0, browse = F.deeper, prefix = 'de',
-      values = rex.json.decode(d.saved_values), pending = {op_key = d.pending_key, profile = 'logtail', spawn_id = spawn_id}}},
-    {key = 'draft/plain', value = {at = os.time() - 3600, dir = F.wt, dir_source = 'worktree', dir_rev = 2, error = 'it failed'}},
-    {key = 'draft/old', value = {at = os.time() - 2 * 24 * 3600, dir = F.sub}}})
-  put_operation({key = d.pending_key, fingerprint = 'start-v1', result = {request = rex.json.decode(start.request), values = rex.json.decode(start.saved_values)}})
-  -- A request that the older version saved before hub.spawn, with no pending draft yet (a stop in
-  -- between). A retry of its key after the move must send that request, not one built again.
-  local s2 = F.source()
-  local v2 = F.form(s2, 'start_accessory')
-  local function part(x) return tostring(#x) .. ':' .. x end
-  local saved = {['for'] = 'user', profile = 'logtail', key = 'profiles-start/import-2', cwd = F.wt,
-    placement = {session = s2.session, focus = {source_window_id = s2.window}}}
-  write({{key = 'draft/' .. v2.id, value = {at = os.time(), dir = F.sub, dir_source = 'pwd', dir_rev = 0}}})
-  put_operation({key = 'start/' .. part(v2.id) .. part('import-2'), fingerprint = 'start-v1', result = {request = saved, values = values()}})
-  for _, statement in ipairs({'DROP TABLE drafts', 'DROP TABLE starts', 'PRAGMA user_version = 0'}) do sql_write(statement) end
-  hub:restart()
-  -- The SDK runs the migrations after the plugin registers, so hub:restart can return first.
-  wait('the import', function() return sql("SELECT name FROM sqlite_master WHERE name = 'drafts'")[1] and F.draft('plain') end, 15)
-
-  local plain = F.draft('plain')
-  expect({plain.dir, plain.dir_source, plain.dir_rev, plain.error}).to_equal({F.wt, 'worktree', 2, 'it failed'})
-  expect(F.draft('old')).to_be(nil)
-  v = user:view('/forms/start-accessory', nil, s.session)
-  local tree = v:render()
-  expect(node(tree, 'pending')).to_be_truthy()
-  expect(node(tree, 'dismiss_actions').items[1].id).to_be('dismiss:' .. spawn_id)
-  -- Check again sends the imported request: the same spawn, no second worker.
-  succeeded(v:action('pending_actions', 'check', {item_id = 'check'}))
-  expect(F.draft(v.id).pending_spawn_id).to_be(spawn_id)
-  local count = 0
-  for _, w in ipairs(alice:call('hub.workers', {}).workers or {}) do if w.spawn_id == spawn_id then count = count + 1 end end
-  expect(count).to_be(1)
-
-  v2 = user:view('/forms/start-accessory', nil, s2.session)
-  local before = F.ids(alice)
-  succeeded(v2:action('start', 'start', {values = values()}, 'import-2'))
-  expect(F.new_worker(alice, before).cwd).to_be(F.wt)
-end)
-
 test('a broken profile file shows its error; a kind with no profiles says so', function()
   write_profiles('{"profiles": [')
   local v, tree = F.form(src, 'start_agent')

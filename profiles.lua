@@ -67,48 +67,12 @@ local function expire_drafts()
   db.exec('DELETE FROM starts WHERE at < ? AND op_key NOT IN (SELECT pending_key FROM drafts WHERE pending_key IS NOT NULL)', old)
 end
 
--- The one-time import from hub.store (before the move to SQL). First every saved start request
--- (hub.store.ops_scan): a retry of its operation key must send that exact request, also when no
--- draft names it yet (a stop between the save and hub.spawn). Then the drafts younger than a day; a
--- pending draft keeps its start, so the form still offers Check again. The saved replies of
--- directory choices are not imported: a retried choice runs again and changes nothing more.
-local function import_old()
-  local now, after = os.time(), nil
-  repeat
-    local page = app.hub('hub.store.ops_scan', {after = after, limit = 100})
-    for _, op in ipairs(page.ops or {}) do
-      local n, rest = tostring(op.key):match('^start/(%d+):(.*)$')
-      local start = type(op.result) == 'table' and op.result
-      if n and start and type(start.request) == 'table' then
-        db.exec('INSERT INTO starts (op_key, view_id, at, request, saved_values) VALUES (?, ?, ?, ?, ?)', op.key, rest:sub(1, tonumber(n)), now,
-          rex.json.encode(start.request), type(start.values) == 'table' and rex.json.encode(start.values) or nil)
-      end
-    end
-    after = page.next
-  until type(after) ~= 'string' or after == ''
-  after = nil
-  repeat
-    local page = app.hub('hub.store.scan', {prefix = 'draft/', after = after, limit = 100})
-    for key, record in pairs(page.records or {}) do
-      local d = type(record) == 'table' and record.value
-      if type(d) == 'table' and type(d.at) == 'number' and d.at >= now - draft_ttl then
-        local p = type(d.pending) == 'table' and type(d.pending.op_key) == 'string' and d.pending or nil
-        if p and not db.first('SELECT op_key FROM starts WHERE op_key = ?', p.op_key) then p = nil end
-        db.exec('INSERT INTO drafts (view_id, at, dir, dir_source, dir_rev, error, dismissed, saved_values, pending_key, pending_profile, pending_spawn_id) ' ..
-          'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', key:sub(7), d.at, d.dir, d.dir_source, tonumber(d.dir_rev) or 0, d.error,
-          d.dismissed, type(d.values) == 'table' and rex.json.encode(d.values) or nil, p and p.op_key, p and tostring(p.profile), p and p.spawn_id)
-      end
-    end
-    after = page.next
-  until type(after) ~= 'string' or after == ''
-end
-schema[#schema + 1] = import_old
-app.db.migrate {function() for _, step in ipairs(schema) do if type(step) == 'function' then step() else db.exec(step) end end end}
+app.db.migrate {function() for _, statement in ipairs(schema) do db.exec(statement) end end}
 
 -- form_dir answers the directory that the form shows. The hub reads the source pane's directory
 -- once, when it opens the form, and each render and action gets that report (ctx.source.pwd, or
 -- ctx.source.pwd_error; LazyRex docs/hub.md). So the form keeps the directory that it first showed,
--- also when the source pane changes directory later. An explicit choice or an imported draft wins.
+-- also when the source pane changes directory later. An explicit choice wins.
 local function form_dir(ctx, draft)
   if draft and ((draft.dir_rev or 0) > 0 or draft.dir_source) then return draft.dir, draft.dir_source end
   local path = dirs.pwd_path(ctx.source and ctx.source.pwd)
