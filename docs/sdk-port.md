@@ -50,7 +50,9 @@ Drafts live for one day, but a pending start must survive the cutover (an open f
 again, and Start stays hidden). The import runs once, in migration 2:
 
 1. Scan `hub.store` prefix `draft/`. Insert each draft younger than one day.
-2. For each draft with `pending`, read `hub.store.op` for its `op_key` and insert the `starts` row.
+2. Insert a `starts` row for each saved start operation record, also one that no pending draft
+   names (a spawn reply lost before the draft became pending). This needs a scan of operation
+   records (gap 9). Old in-flight `draft-op/` keys need the same scan.
 3. Leave the hub.store records. They expire with no reader. A later commit can delete them.
 
 The import needs hub.store reads from the SDK (gap 1) and a migration that can call the hub (gap 7).
@@ -89,3 +91,4 @@ the same. These parts change with the storage:
 6. A long handler: commit a row, call the hub, then write again, with the operation key's replay.
 7. A first render that writes a row, and a migration step that calls the hub.
 8. Test harness: SQL reads and writes of the plugin's database, and faults on `hub.sql.*`.
+9. A scan of the plugin's hub.store operation records for the import (from the reviewer).
