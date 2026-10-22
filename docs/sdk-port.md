@@ -50,12 +50,14 @@ Drafts live for one day, but a pending start must survive the cutover (an open f
 again, and Start stays hidden). The import runs once, in migration 2:
 
 1. Scan `hub.store` prefix `draft/`. Insert each draft younger than one day.
-2. Insert a `starts` row for each saved start operation record, also one that no pending draft
-   names (a spawn reply lost before the draft became pending). This needs a scan of operation
-   records (gap 9). Old in-flight `draft-op/` keys need the same scan.
+2. A start or a directory choice that the hub retries after the cutover has an operation key but
+   no SQL row. The handler then reads the legacy record by its known key (`hub.store.op` of
+   `start/...` or `draft-op/...`), so no scan of operation records is necessary. The key is
+   known at the retry: it is made from the view ID and the operation key.
 3. Leave the hub.store records. They expire with no reader. A later commit can delete them.
 
-The import needs hub.store reads from the SDK (gap 1) and a migration that can call the hub (gap 7).
+The import needs hub.store reads through `app.hub` (gap 1). Step 1 runs once, at the first start
+after migration 1 (a row in a `meta` table records it).
 
 ## Delete
 
@@ -79,6 +81,11 @@ the same. These parts change with the storage:
 
 ## SDK gaps (sent to the hub lead and the SDK module pair)
 
+The hub lead answered 1, 5, 6 and 8 (hub.sql handoff, 2026-10-22): `app.hub` keeps the code, the
+sibling `require` works, long work uses `tx = false` with `hub.sql.batch`, and the harness gets
+`H.sql` and a commit fault. Gap 4: `hub.ui.invalidate` and explicit deps stay. Open with the SDK
+module pair: 2, 3, 4 (an SDK wrapper) and 7.
+
 1. A call to a hub action (`hub.profiles`, `hub.spawn`, `hub.workers`, `hub.store.*` for the
    import), with the hub's error code kept.
 2. Palette commands that open a form route, not a panel tab.
@@ -91,4 +98,4 @@ the same. These parts change with the storage:
 6. A long handler: commit a row, call the hub, then write again, with the operation key's replay.
 7. A first render that writes a row, and a migration step that calls the hub.
 8. Test harness: SQL reads and writes of the plugin's database, and faults on `hub.sql.*`.
-9. A scan of the plugin's hub.store operation records for the import (from the reviewer).
+9. Withdrawn: the legacy records are read by their known key (step 2 of the import).
