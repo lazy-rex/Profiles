@@ -177,7 +177,7 @@ test('a fresh database has schema 2; a version-1 database upgrades and keeps its
     'CREATE INDEX drafts_at ON drafts (at)', 'PRAGMA user_version = 1'}) do sql_write(statement) end
   sql_write('INSERT INTO drafts (view_id, at, dir, dir_source, dir_rev, error, saved_values, pending_key, pending_profile, pending_spawn_id) ' ..
     'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', {'v1-view', os.time(), F.wt, 'worktree', 2, 'it failed', '{"title":"Mine"}', 'v1-key', 'logtail', 'spawn-1'})
-  sql_write('INSERT INTO starts (op_key, view_id, at, request) VALUES (?, ?, ?, ?)', {'v1-key', 'v1-view', os.time(), '{"profile":"logtail"}'})
+  sql_write('INSERT INTO starts (op_key, view_id, at, request, saved_values) VALUES (?, ?, ?, ?, ?)', {'v1-key', 'v1-view', os.time(), '{"profile":"logtail"}', '{"title":"Mine"}'})
   hub:restart()
   -- The SDK runs the migrations after the plugin registers, so hub:restart can return first.
   wait('the upgrade', function() return sql('PRAGMA user_version')[1].user_version == 2 end, 15)
@@ -185,7 +185,8 @@ test('a fresh database has schema 2; a version-1 database upgrades and keeps its
   local d = F.draft('v1-view')
   expect({d.dir, d.dir_rev, d.error, d.saved_values, d.pending_key, d.pending_profile, d.pending_spawn_id})
     .to_equal({F.wt, 2, 'it failed', '{"title":"Mine"}', 'v1-key', 'logtail', 'spawn-1'})
-  expect(sql('SELECT request FROM starts WHERE op_key = ?', {'v1-key'})[1].request).to_be('{"profile":"logtail"}')
+  local start = sql('SELECT request, saved_values FROM starts WHERE op_key = ?', {'v1-key'})[1]
+  expect({start.request, start.saved_values}).to_equal({'{"profile":"logtail"}', '{"title":"Mine"}'})
 end)
 
 test('an explicit title reaches the worker, the same as an agent title', function()
