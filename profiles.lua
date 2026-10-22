@@ -67,16 +67,18 @@ local function expire_drafts()
   db.exec('DELETE FROM starts WHERE at < ? AND op_key NOT IN (SELECT pending_key FROM drafts WHERE pending_key IS NOT NULL)', old)
 end
 
-app.db.migrate {function() for _, statement in ipairs(schema) do db.exec(statement) end end}
+-- Version 2 drops drafts.dir_source: an explicit choice is known by dir_rev alone.
+app.db.migrate {function() for _, statement in ipairs(schema) do db.exec(statement) end end, 'ALTER TABLE drafts DROP COLUMN dir_source'}
 
 -- form_dir answers the directory that the form shows. The hub reads the source pane's directory
 -- once, when it opens the form, and each render and action gets that report (ctx.source.pwd, or
 -- ctx.source.pwd_error; LazyRex docs/hub.md). So the form keeps the directory that it first showed,
--- also when the source pane changes directory later. An explicit choice wins.
+-- also when the source pane changes directory later. An explicit choice wins. The second value is
+-- true when the directory is the source pane's.
 local function form_dir(ctx, draft)
-  if draft and ((draft.dir_rev or 0) > 0 or draft.dir_source) then return draft.dir, draft.dir_source end
+  if draft and (draft.dir_rev or 0) > 0 then return draft.dir, false end
   local path = dirs.pwd_path(ctx.source and ctx.source.pwd)
-  return path, path and 'pwd' or nil
+  return path, path ~= nil
 end
 
 -- The draft holds a raw path; the Directory field holds editor text, which normalize_dir decodes.
@@ -87,10 +89,10 @@ local function dir_text(dir) return dir and (dir:gsub('\\', '\\\\')) or '' end
 -- also when the user edited it. The choice increments dir_rev, the field's rev: a changed rev makes
 -- the renderer replace the editor text. The choice also replaces the directory in the values saved
 -- by a failed start, and keeps the other saved values.
-local function choose_dir(args, dir, source)
-  db.exec('INSERT INTO drafts (view_id, at, dir, dir_source, dir_rev) VALUES (?, ?, ?, ?, 1) ON CONFLICT (view_id) DO UPDATE SET ' ..
-    "at = excluded.at, dir = excluded.dir, dir_source = excluded.dir_source, dir_rev = dir_rev + 1, saved_values = json_set(saved_values, '$.dir', ?)",
-    view_id(args), os.time(), dir, source, dir_text(dir))
+local function choose_dir(args, dir)
+  db.exec('INSERT INTO drafts (view_id, at, dir, dir_rev) VALUES (?, ?, ?, 1) ON CONFLICT (view_id) DO UPDATE SET ' ..
+    "at = excluded.at, dir = excluded.dir, dir_rev = dir_rev + 1, saved_values = json_set(saved_values, '$.dir', ?)",
+    view_id(args), os.time(), dir, dir_text(dir))
   return {}
 end
 
@@ -115,7 +117,7 @@ local function render_start(ctx, args)
   local kind = kinds[args.route]
   local context = context_of(args)
   local draft = read_draft(view_id(args)) or {}
-  local dir, dir_source = form_dir(ctx, draft)
+  local dir, from_pwd = form_dir(ctx, draft)
   local title = kind == 'agent' and 'Start Agent' or 'Start Accessory'
   local nodes = {}
   if draft.pending then
@@ -168,7 +170,7 @@ local function render_start(ctx, args)
   -- which types the chosen path into the field (pane.insert_path). When the app refuses the browser
   -- (no_app, ambiguous_app), the user types the path.
   local dir_label = 'Directory'
-  if dir_source == 'pwd' then dir_label = dir_label .. ' (from the source pane)' end
+  if from_pwd then dir_label = dir_label .. ' (from the source pane)' end
   if not dir then dir_label = dir_label .. " (empty: each profile's own directory)" end
   -- The renderer takes a changed value while the user has not edited the field. A changed rev
   -- (an explicit choice, choose_dir) replaces the text also after an edit. Saved submitted values
@@ -336,8 +338,8 @@ local function view_action(ctx, args)
     return {}
   end
   if args.node_id == 'dir_choices' then
-    if args.action == 'default' then return choose_dir(args, nil, nil) end
-    if args.action == 'choose' and id:sub(1, 5) == 'tree:' then return choose_dir(args, id:sub(6), 'worktree') end
+    if args.action == 'default' then return choose_dir(args, nil) end
+    if args.action == 'choose' and id:sub(1, 5) == 'tree:' then return choose_dir(args, id:sub(6)) end
   end
   fail('invalid_input', 'Unknown action ' .. tostring(args.action) .. ' on ' .. tostring(args.node_id))
 end

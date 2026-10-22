@@ -160,6 +160,34 @@ test('a draft whose form never ended expires after a day, when the plugin starts
   expect(F.draft('fresh-view')).to_be_truthy()
 end)
 
+local function columns()
+  local list = {}
+  for _, c in ipairs(sql("SELECT name FROM pragma_table_info('drafts')")) do list[#list + 1] = c.name end
+  return table.concat(list, ',')
+end
+local current = 'view_id,at,dir,dir_rev,error,dismissed,saved_values,pending_key,pending_profile,pending_spawn_id'
+
+test('a fresh database has schema 2; a version-1 database upgrades and keeps its rows', function()
+  expect(sql('PRAGMA user_version')[1].user_version).to_be(2)
+  expect(columns()).to_be(current)
+  -- A version-1 database with a draft and a start, as the live plugin left it.
+  for _, statement in ipairs({'DROP TABLE drafts',
+    'CREATE TABLE drafts (view_id TEXT PRIMARY KEY, at INTEGER NOT NULL, dir TEXT, dir_source TEXT, dir_rev INTEGER NOT NULL DEFAULT 0, ' ..
+      'error TEXT, dismissed TEXT, saved_values TEXT, pending_key TEXT, pending_profile TEXT, pending_spawn_id TEXT)',
+    'CREATE INDEX drafts_at ON drafts (at)', 'PRAGMA user_version = 1'}) do sql_write(statement) end
+  sql_write('INSERT INTO drafts (view_id, at, dir, dir_source, dir_rev, error, saved_values, pending_key, pending_profile, pending_spawn_id) ' ..
+    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', {'v1-view', os.time(), F.wt, 'worktree', 2, 'it failed', '{"title":"Mine"}', 'v1-key', 'logtail', 'spawn-1'})
+  sql_write('INSERT INTO starts (op_key, view_id, at, request) VALUES (?, ?, ?, ?)', {'v1-key', 'v1-view', os.time(), '{"profile":"logtail"}'})
+  hub:restart()
+  -- The SDK runs the migrations after the plugin registers, so hub:restart can return first.
+  wait('the upgrade', function() return sql('PRAGMA user_version')[1].user_version == 2 end, 15)
+  expect(columns()).to_be(current)
+  local d = F.draft('v1-view')
+  expect({d.dir, d.dir_rev, d.error, d.saved_values, d.pending_key, d.pending_profile, d.pending_spawn_id})
+    .to_equal({F.wt, 2, 'it failed', '{"title":"Mine"}', 'v1-key', 'logtail', 'spawn-1'})
+  expect(sql('SELECT request FROM starts WHERE op_key = ?', {'v1-key'})[1].request).to_be('{"profile":"logtail"}')
+end)
+
 test('an explicit title reaches the worker, the same as an agent title', function()
   local v = F.form(src, 'start_accessory')
   local before = F.ids(alice)
