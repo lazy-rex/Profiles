@@ -3,7 +3,6 @@
 -- source pane. The hub owns profiles, spawns and placement; Rex and Git own directories
 -- (profiles_directories.lua). This plugin owns only the form, its draft and its saved starts.
 -- The LazyRex Plugin SDK (docs/plugin-sdk.md) does the registration, the hub calls and the storage.
-if rex.args.lazyrex_sdk then package.path = rex.args.lazyrex_sdk .. '/?.lua;' .. package.path end
 local app = require('lazyrex').plugin('profiles')
 local dirs = require('profiles_directories')
 local db, fail = app.db, app.fail

@@ -1,6 +1,7 @@
 {
  "name": "profiles",
  "main": "profiles.lua",
+ "sdk": "0",
  "test": {
   "agents": [
    {"id": "alice", "name": "Alice"},

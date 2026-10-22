@@ -10,7 +10,10 @@ Check this repository out next to LazyRex, and add the plugin to the hub config:
 {"name": "profiles", "path": "/path/to/Profiles/profiles.lua"}
 ```
 
-The plugin loads its other files from its own directory, so keep them together.
+The plugin uses the LazyRex Plugin SDK (`"sdk": "0"` in `lazyrex.json`), and it loads its other
+files from its own directory, so keep them together. Its data is in its own SQL database (hub.sql):
+the table `drafts` (one row for each open form) and the table `starts` (the exact `hub.spawn`
+request of each submit). Drafts expire after a day.
 
 ## Agents
 
@@ -39,7 +42,8 @@ cd ../../Profiles && lazyrex-hub test
 - contract.lua: the plugin client and the agent face.
 - start.lua: each start flow as the user (the form) and as an agent (hub.spawn); admission,
   replay, conflicts and stop.
-- form.lua: the form's tree, its draft and the Directory field's text.
+- form.lua: the form's tree, its draft, the Directory field's text, and the one-time import of the
+  drafts from hub.store.
 - pending.lua: pending and failed starts (the hub's spawn-create faults), and a lost hub.spawn
   reply that the hub retries with the same key; Dismiss pending start.
 - restart.lua: a pending start across a hub stop and a crash.

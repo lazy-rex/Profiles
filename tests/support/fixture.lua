@@ -135,6 +135,8 @@ return function(H)
     if not found then error('no new worker', 0) end
     return found
   end
+  -- draft returns the form's draft row (the plugin's SQL table drafts), or nil.
+  function F.draft(view_id) return H.sql('SELECT * FROM drafts WHERE view_id = ?', {view_id})[1] end
   -- same keeps the fields that a UI start and an agent start must share.
   function F.same(w) return {profile = w.profile, cwd = w.cwd, session_id = w.session_id, title = w.title} end
   return F

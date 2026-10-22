@@ -105,7 +105,9 @@ module pair: 2, 3, 4 (an SDK wrapper) and 7.
 - profiles.lua is ported on this branch (code first). It uses `app.view` (raw form views, `tx = false`),
   `app.command`, `app.hub`, `app.on('hub.changed')` with `app.refresh`, and `app.db`.
   Each write is one SQL statement (upserts), so it needs no handler transaction.
-- Lines: profiles.lua 451 before, 399 after. The one-time import is 32 of them, and a later commit
+- Lines: profiles.lua 451 before, 398 after. The one-time import is 32 of them, and a later commit
   can delete it. The form tree and the request code (about 200 lines) do not change.
-- Untested: the hub has no `hub.sql` yet. The SQL statements were checked with sqlite3 3.54.0.
-  The tests move to `H.sql` when the hub branch lands.
+- Tested: all 7 test files pass (50 tests, and the parity sweep of each file) on LazyRex hub/sql-r2 c840c92 with
+  sdk/lua 62dde56 in a lab. The tests read the tables with `sql()`, and the lost commit reply is an
+  `inject{match = {sql_commit_writes = 'drafts'}}`. A negative control: without the import, the
+  import test fails.

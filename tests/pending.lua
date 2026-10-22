@@ -105,7 +105,7 @@ test('a lost answer for an agent: pending until the agent joins, then Check agai
     for _, w in ipairs(views()) do if w.view_id == v.id then return nil end end
     return true
   end, 10)
-  expect(store('draft/' .. v.id).rev).to_be('0')
+  expect(F.draft(v.id)).to_be(nil)
   local w = F.worker(alice, spawn.spawn_id)
   expect({w.parent, w.cwd}).to_equal({'user', F.sub})
   expect(F.spawn_blocks(src.session, spawn.spawn_id)).to_have_length(1)
@@ -168,12 +168,12 @@ test('Dismiss: the form forgets the pending start, keeps the values, and the hub
   -- The dismiss write commits, then its reply is lost: the hub runs the action again, which finds
   -- no matching pending start and changes nothing. A replay with the same arguments returns the
   -- recorded result.
-  local lost = fault({point = 'action', action = 'hub.store.batch', when = 'after', mode = 'lose-reply'})
+  local lost = inject({match = {sql_commit_writes = 'drafts'}, fail = 'lost reply', fail_code = 'client_unavailable', after = true})
   dismiss(v, spawn_id, 'dismiss-op-1')
-  expect(fault_fired(lost)).to_be(true)
-  local rev = store('draft/' .. v.id).rev
+  expect(injection(lost).consumed).to_be(1)
+  local d = F.draft(v.id)
   dismiss(v, spawn_id, 'dismiss-op-1')
-  expect(store('draft/' .. v.id).rev).to_be(rev)
+  expect(F.draft(v.id)).to_equal(d)
   tree = v:render()
   expect(node(tree, 'pending')).to_be(nil)
   expect(node(tree, 'dismissed').text).to_be(dismissed_note('logtail'))
@@ -222,9 +222,9 @@ test('Dismiss: a stale or absent target changes nothing and writes nothing', fun
   local src = F.source()
   local v = F.form(src, 'start_accessory')
   -- Absent: no pending start.
-  local rev = store('draft/' .. v.id).rev
+  local d = F.draft(v.id)
   dismiss(v, 'spawn-none', 'stale-0')
-  expect(store('draft/' .. v.id).rev).to_be(rev)
+  expect(F.draft(v.id)).to_equal(d)
 
   fault({point = 'spawn-create', mode = 'drop', op = 'profiles-start/stale-1'})
   succeeded(v:action('start', 'start', {values = values()}, 'stale-1'))
@@ -236,10 +236,10 @@ test('Dismiss: a stale or absent target changes nothing and writes nothing', fun
   local second
   for _, w in ipairs(workers_of(src.session, 'logtail')) do if w.spawn_id ~= first then second = w.spawn_id end end
   expect(second).to_be_truthy()
-  rev = store('draft/' .. v.id).rev
+  d = F.draft(v.id)
   -- A Dismiss of the old target (a new key, as from an older tree) leaves the newer start pending.
   dismiss(v, first, 'stale-op-2')
-  expect(store('draft/' .. v.id).rev).to_be(rev)
+  expect(F.draft(v.id)).to_equal(d)
   local tree = v:render()
   expect(node(tree, 'pending')).to_be_truthy()
   expect(node(tree, 'dismiss_actions').items[1].id).to_be('dismiss:' .. second)

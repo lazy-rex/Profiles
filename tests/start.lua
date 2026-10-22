@@ -28,7 +28,7 @@ test('a new tab: the form and hub.spawn start the same worker in the source sess
   local op = succeeded(v:action('start', 'start', {values = start_values({dir = dir.value})}))
   local ui = F.new_worker(alice, before)
   expect(ui.parent).to_be('user')
-  expect(store('draft/' .. v.id).rev).to_be('0')
+  expect(F.draft(v.id)).to_be(nil)
   -- close_form: the form's view is gone.
   wait('the form closed', function()
     for _, w in ipairs(views()) do if w.view_id == v.id then return nil end end
@@ -241,8 +241,8 @@ test('replay and conflicts: a key belongs to its caller; a changed request is re
   local function part(x) return tostring(#x) .. ':' .. x end
   local saved = {['for'] = 'user', profile = 'logtail', key = 'profiles-start/' .. key, cwd = F.wt,
     placement = {session = src.session, focus = {source_window_id = src.window}}}
-  put_operation({key = 'start/' .. part(v.id) .. part(key), fingerprint = 'start-v1', result = {request = saved,
-    values = start_values({dir = F.wt})}})
+  sql_write('INSERT INTO starts (op_key, view_id, at, request, saved_values) VALUES (?, ?, ?, ?, ?)',
+    {'start/' .. part(v.id) .. part(key), v.id, os.time(), rex.json.encode(saved), rex.json.encode(start_values({dir = F.wt}))})
   F.cd(src, F.deeper)
   local profiles = rex.json.decode(rex.json.encode(F.profiles))
   profiles.profiles[3].name = 'Renamed tail'
