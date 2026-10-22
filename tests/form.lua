@@ -94,6 +94,17 @@ test('the Directory field text is data: escapes, ~, trailing slashes, quotes; no
   end
 end)
 
+-- Rex Lua table.concat fails with "registry overflow" above 2559 items (LazyRex docs/rex-protocol.md,
+-- observed on Rex 0.0.1792158932-g88fd41). The decoder must not join one item per character.
+test('a Directory field text of 4500 characters decodes', function()
+  local base = F.root .. '/n/'
+  local w, op = start_text(base .. string.rep('a\\ ', 1500))
+  expect(w).to_be(nil)
+  -- The hub refuses the decoded path (3000 characters after the base), and its message names it.
+  expect(op.error.code, op.error.message:sub(1, 160)).to_be('refused')
+  expect(op.error.message:find(base .. string.rep('a ', 1500), 1, true) ~= nil, op.error.message:sub(1, 120)).to_be(true)
+end)
+
 test('a raw path with a backslash and a space round-trips through the field', function()
   local raw = F.root .. '/back\\slash and space'
   F.mkdir(raw)
