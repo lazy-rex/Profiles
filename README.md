@@ -43,7 +43,7 @@ cd ../../Profiles && lazyrex-hub test
 - contract.lua: the plugin client and the agent face.
 - start.lua: each start flow as the user (the form) and as an agent (hub.spawn); admission,
   replay, conflicts and stop.
-- form.lua: the form's tree, its draft, the Directory field's text, draft expiry and the schema upgrade.
+- form.lua: the form's tree, its draft, the Directory field's text, draft expiry and the schema.
 - pending.lua: pending and failed starts (the hub's spawn-create faults), and a lost hub.spawn
   reply that the hub retries with the same key; Dismiss pending start.
 - restart.lua: a pending start across a hub stop and a crash.
