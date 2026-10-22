@@ -67,25 +67,33 @@ local function expire_drafts()
   db.exec('DELETE FROM starts WHERE at < ? AND op_key NOT IN (SELECT pending_key FROM drafts WHERE pending_key IS NOT NULL)', old)
 end
 
--- The one-time import of the drafts from hub.store (before the move to SQL). A pending draft keeps
--- its saved start, so the form still offers Check again. Other operation records are not imported:
--- hub.spawn is idempotent per key, so a start that the hub retries after the move cannot run twice.
-local function import_drafts()
+-- The one-time import from hub.store (before the move to SQL). First every saved start request
+-- (hub.store.ops_scan): a retry of its operation key must send that exact request, also when no
+-- draft names it yet (a stop between the save and hub.spawn). Then the drafts younger than a day; a
+-- pending draft keeps its start, so the form still offers Check again. The saved replies of
+-- directory choices are not imported: a retried choice runs again and changes nothing more.
+local function import_old()
   local now, after = os.time(), nil
+  repeat
+    local page = app.hub('hub.store.ops_scan', {after = after, limit = 100})
+    for _, op in ipairs(page.ops or {}) do
+      local n, rest = tostring(op.key):match('^start/(%d+):(.*)$')
+      local start = type(op.result) == 'table' and op.result
+      if n and start and type(start.request) == 'table' then
+        db.exec('INSERT INTO starts (op_key, view_id, at, request, saved_values) VALUES (?, ?, ?, ?, ?)', op.key, rest:sub(1, tonumber(n)), now,
+          rex.json.encode(start.request), type(start.values) == 'table' and rex.json.encode(start.values) or nil)
+      end
+    end
+    after = page.next
+  until type(after) ~= 'string' or after == ''
+  after = nil
   repeat
     local page = app.hub('hub.store.scan', {prefix = 'draft/', after = after, limit = 100})
     for key, record in pairs(page.records or {}) do
       local d = type(record) == 'table' and record.value
       if type(d) == 'table' and type(d.at) == 'number' and d.at >= now - draft_ttl then
         local p = type(d.pending) == 'table' and type(d.pending.op_key) == 'string' and d.pending or nil
-        local saved = p and app.hub('hub.store.op', {key = p.op_key})
-        local start = saved and saved.found and type(saved.result) == 'table' and saved.result
-        if start and type(start.request) == 'table' then
-          db.exec('INSERT INTO starts (op_key, view_id, at, request, saved_values) VALUES (?, ?, ?, ?, ?)', p.op_key, key:sub(7), d.at,
-            rex.json.encode(start.request), type(start.values) == 'table' and rex.json.encode(start.values) or nil)
-        else
-          p = nil
-        end
+        if p and not db.first('SELECT op_key FROM starts WHERE op_key = ?', p.op_key) then p = nil end
         db.exec('INSERT INTO drafts (view_id, at, dir, dir_source, dir_rev, error, dismissed, saved_values, pending_key, pending_profile, pending_spawn_id) ' ..
           'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', key:sub(7), d.at, d.dir, d.dir_source, tonumber(d.dir_rev) or 0, d.error,
           d.dismissed, type(d.values) == 'table' and rex.json.encode(d.values) or nil, p and p.op_key, p and tostring(p.profile), p and p.spawn_id)
@@ -94,7 +102,7 @@ local function import_drafts()
     after = page.next
   until type(after) ~= 'string' or after == ''
 end
-schema[#schema + 1] = import_drafts
+schema[#schema + 1] = import_old
 app.db.migrate {function() for _, step in ipairs(schema) do if type(step) == 'function' then step() else db.exec(step) end end end}
 
 -- form_dir answers the directory that the form shows. The hub reads the source pane's directory

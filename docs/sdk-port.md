@@ -49,15 +49,16 @@ take up to 10 s, more than the handler transaction allows (gap 6).
 Drafts live for one day, but a pending start must survive the cutover (an open form keeps Check
 again, and Start stays hidden). The import runs once, in migration 1:
 
-1. Scan `hub.store` prefix `draft/`. Insert each draft younger than one day.
-2. For each pending draft, read its start record by its known key (`hub.store.op`) and insert the
-   `starts` row. Other operation records are not imported. A start that the hub retries after the
-   cutover rebuilds its request from the imported draft and sends the same `hub.spawn` key, so it
-   cannot start twice (a changed request gets `conflict`). A retried directory choice or Dismiss
-   that runs twice changes nothing more than its first run did.
+1. Read every saved start request (`hub.store.ops_scan`, keys `start/...`) and insert a `starts`
+   row for each. A request can be saved before any draft names it (a stop between the save and
+   `hub.spawn`); a retry of its key after the cutover must send that exact request (reviewer finding,
+   2026-10-22).
+2. Scan `hub.store` prefix `draft/`. Insert each draft younger than one day. A pending draft keeps
+   its start only when step 1 found it. A retried directory choice or Dismiss is not imported: it
+   runs again and changes nothing more than its first run did.
 3. Leave the hub.store records. They expire with no reader. A later commit can delete them.
 
-The import needs hub.store reads through `app.hub` (gap 1). The import is part of migration 1, so it runs once.
+The import needs hub.store reads through `app.hub` (gap 1) and `hub.store.ops_scan` (hub/sql-r2). The import is part of migration 1, so it runs once.
 
 ## Delete
 
@@ -98,7 +99,7 @@ module pair: 2, 3, 4 (an SDK wrapper) and 7.
 6. A long handler: commit a row, call the hub, then write again, with the operation key's replay.
 7. A first render that writes a row, and a migration step that calls the hub.
 8. Test harness: SQL reads and writes of the plugin's database, and faults on `hub.sql.*`.
-9. Withdrawn: the import reads each pending start by its known key, and needs no other record.
+9. Done: `hub.store.ops_scan` (hub/sql-r2 f6f1a03). The import reads every saved start with it.
 
 ## Status of the port
 
@@ -110,7 +111,7 @@ module pair: 2, 3, 4 (an SDK wrapper) and 7.
 - profiles.lua is ported on this branch (code first). It uses `app.view` (raw form views, `tx = false`),
   `app.command`, `app.hub`, `app.on('hub.changed')` with `app.refresh`, and `app.db`.
   Each write is one SQL statement (upserts), so it needs no handler transaction.
-- Lines: profiles.lua 451 before, 388 after; with the helper, 567 before, 471 after. The one-time import is 32 of them, and a later commit
+- Lines: profiles.lua 451 before, 396 after; with the helper, 567 before, 479 after. The one-time import is 32 of them, and a later commit
   can delete it. The form tree and the request code (about 200 lines) do not change.
 - Tested: all 7 test files pass (50 tests, and the parity sweep of each file) on LazyRex hub/sql-r2 c840c92 with
   sdk/lua 62dde56 in a lab. The tests read the tables with `sql()`, and the lost commit reply is an
