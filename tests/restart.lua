@@ -9,8 +9,10 @@ F.mkdir(F.root .. '/bin')
 F.run({'cp', H.args.hub_bin, bin})
 local gate = F.root .. '/join-gate'
 local profiles = rex.json.decode(rex.json.encode(F.profiles))
-profiles.profiles[#profiles.profiles + 1] = {id = 'joiner', name = 'Joiner', kind = 'agent', cwd = F.repo, command = {'/bin/sh', '-c',
-  'while [ ! -e "$0" ]; do sleep 0.1; done; exec "$1" testagent -id "$LAZYREX_AGENT" -join "$LAZYREX_AGENT"', gate, bin}}
+profiles.profiles[#profiles.profiles + 1] = {id = 'joiner', name = 'Joiner', kind = 'agent', cwd = F.repo, command = {'/bin/sh', '-c', [[
+while [ ! -e "$0" ]; do sleep 0.1; done
+"$1" testagent report "$(printf '{"kind":"codex","conversation_id":"joiner-%s","source":"startup"}' $$)"
+exec sleep 100000]], gate, bin}}
 write_profiles(profiles)
 
 local function succeeded(op)
@@ -58,7 +60,7 @@ for _, mode in ipairs({{name = 'a stop', opts = nil}, {name = 'a crash', opts = 
     expect(workers_of(src.session, 'joiner')).to_have_length(1)
 
     F.run({'touch', gate})
-    local joined = wait('the agent joins', function()
+    local joined = wait('the agent reports', function()
       local w = F.worker(alice, spawn.spawn_id)
       return w and w.state ~= 'starting' and w or nil
     end, 20)

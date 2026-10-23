@@ -4,15 +4,18 @@
 local F = assert(loadfile(H.args.file:match('^(.*)/[^/]*$') .. '/support/fixture.lua'))()(H)
 local alice = agent('alice')
 
--- joiner: an agent profile whose process joins the hub only after the gate file exists, so a test
--- sees the pending state first. The joining process is the harness test agent (a copy in the lab).
+-- joiner: an agent profile whose process reports its identity (hub.identity.report) only after
+-- the gate file exists, so a test sees the pending state first. The report from the spawn's pane opens
+-- the spawn (LazyRex docs/hub.md, "Workers"). The reporter is the harness test agent (a copy in the lab).
 local bin = F.root .. '/bin/lazyrex-hub'
 F.mkdir(F.root .. '/bin')
 F.run({'cp', H.args.hub_bin, bin})
 local gate = F.root .. '/join-gate'
 local profiles = rex.json.decode(rex.json.encode(F.profiles))
-profiles.profiles[#profiles.profiles + 1] = {id = 'joiner', name = 'Joiner', kind = 'agent', cwd = F.repo, command = {'/bin/sh', '-c',
-  'while [ ! -e "$0" ]; do sleep 0.1; done; exec "$1" testagent -id "$LAZYREX_AGENT" -join "$LAZYREX_AGENT"', gate, bin}}
+profiles.profiles[#profiles.profiles + 1] = {id = 'joiner', name = 'Joiner', kind = 'agent', cwd = F.repo, command = {'/bin/sh', '-c', [[
+while [ ! -e "$0" ]; do sleep 0.1; done
+"$1" testagent report "$(printf '{"kind":"codex","conversation_id":"joiner-%s","source":"startup"}' $$)"
+exec sleep 100000]], gate, bin}}
 write_profiles(profiles)
 
 local function values(over)
@@ -87,7 +90,7 @@ test('a lost create: the form shows the pending start, refuses a second start, a
   end, 30)
 end)
 
-test('a lost answer for an agent: pending until the agent joins, then Check again opens it', function()
+test('a lost answer for an agent: pending until the agent reports, then Check again opens it', function()
   local src = F.source()
   local v = F.form(src, 'start_agent')
   local f = fault({point = 'spawn-create', mode = 'lose-answer', op = 'profiles-start/pend-join'})
@@ -102,7 +105,7 @@ test('a lost answer for an agent: pending until the agent joins, then Check agai
   expect(node(v:render(), 'pending')).to_be_truthy()
 
   F.run({'touch', gate})
-  local joined = wait('the agent joins', function()
+  local joined = wait('the agent reports', function()
     local w = F.worker(alice, spawn.spawn_id)
     return w and w.state ~= 'starting' and w or nil
   end, 20)
@@ -201,17 +204,17 @@ test('Dismiss: the form forgets the pending start, keeps the values, and the hub
   expect(both).to_have_length(2)
 end)
 
-test('Dismiss after the agent joined: the running worker and its pane stay; the note claims no state', function()
+test('Dismiss after the agent reported: the running worker and its pane stay; the note claims no state', function()
   local src = F.source()
   local v = F.form(src, 'start_agent')
   fault({point = 'spawn-create', mode = 'lose-answer', op = 'profiles-start/dismiss-join'})
   succeeded(v:action('start', 'start', {values = values({profile = 'joiner'})}, 'dismiss-join'))
   local spawn_id = workers_of(src.session, 'joiner')[1].spawn_id
   expect(node(v:render(), 'dismiss_actions').items[1].id).to_be('dismiss:' .. spawn_id)
-  -- The agent joins, but the form does not know yet (no Check again).
+  -- The agent reports, but the form does not know yet (no Check again).
   F.run({'touch', gate})
   local ok, err = pcall(function()
-    wait('the agent joins', function()
+    wait('the agent reports', function()
       local w = F.worker(alice, spawn_id)
       return w and w.state == 'running' or nil
     end, 20)
@@ -300,7 +303,7 @@ test('hub.spawn as an agent: pending, replay and session gone; a refused create 
   expect(F.spawn_blocks(s2, r.spawn_id)).to_have_length(1)
   expect_error(function() alice:call('hub.stop', {spawn_id = r.spawn_id}) end, 'cannot stop it')
 
-  -- lose-answer with the gated joiner: pending with one pane; after the join a replay of the same
+  -- lose-answer with the gated joiner: pending with one pane; after the report a replay of the same
   -- key returns the same spawn, open, alice's, with one pane.
   local s3 = session('pending-target-3')
   fault({point = 'spawn-create', mode = 'lose-answer', op = 'agent-join'})
@@ -310,7 +313,7 @@ test('hub.spawn as an agent: pending, replay and session gone; a refused create 
   expect(alice:call('hub.spawn', join).status).to_be('pending')
   expect(F.spawn_blocks(s3, j.spawn_id)).to_have_length(1)
   F.run({'touch', gate})
-  local opened = wait('the agent joins', function()
+  local opened = wait('the agent reports', function()
     local x = alice:call('hub.spawn', join)
     return x.status == 'open' and x or nil
   end, 20)
