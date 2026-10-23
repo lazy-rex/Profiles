@@ -13,8 +13,8 @@ local draft_ttl = 24 * 3600 -- a draft whose form never ended expires after a da
 -- A draft holds the form's directory choice for one form view. dir = NULL means each profile's own
 -- directory. dir_rev counts the explicit directory choices (see choose_dir). saved_values holds the
 -- submitted values of a failed or pending start (JSON). A start holds the exact hub.spawn request
--- of one submit (JSON), saved before hub.spawn. dir_source is unused: the previous release writes
--- it, so it stays while a rollback to that release is possible.
+-- of one submit (JSON), saved before hub.spawn. Step 1 is the version-1 schema; step 2 drops the
+-- unused drafts.dir_source.
 local schema = {
   'CREATE TABLE starts (op_key TEXT PRIMARY KEY, view_id TEXT NOT NULL, at INTEGER NOT NULL, request TEXT NOT NULL, saved_values TEXT)',
   'CREATE TABLE drafts (view_id TEXT PRIMARY KEY, at INTEGER NOT NULL, dir TEXT, dir_source TEXT, dir_rev INTEGER NOT NULL DEFAULT 0, ' ..
@@ -68,7 +68,8 @@ local function expire_drafts()
   db.exec('DELETE FROM starts WHERE at < ? AND op_key NOT IN (SELECT pending_key FROM drafts WHERE pending_key IS NOT NULL)', old)
 end
 
-app.db.migrate {function() for _, statement in ipairs(schema) do db.exec(statement) end end}
+app.db.migrate {function() for _, statement in ipairs(schema) do db.exec(statement) end end,
+  'ALTER TABLE drafts DROP COLUMN dir_source'}
 
 -- form_dir answers the directory that the form shows. The hub reads the source pane's directory
 -- once, when it opens the form, and each render and action gets that report (ctx.source.pwd, or
