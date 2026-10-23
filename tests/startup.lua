@@ -7,8 +7,9 @@ local plugin_dir = H.args.file:match('^(.*)/tests/[^/]*$')
 
 -- start loads the plugin in a new environment and runs its zero timers, the last one made first,
 -- also the timers that a timer makes. opts.fail(action, sql): true makes the fake hub fail that call
--- after the first commit (the migration). start answers the hub calls in their order, the hub.sql
--- calls that the fake hub refused, the printed lines, and the calls that it failed.
+-- after the first commit (the migration). opts.version is the user_version of the database (default 2).
+-- start answers the hub calls in their order, the hub.sql calls that the fake hub refused, the printed
+-- lines, and the calls that it failed.
 local function start(opts)
   opts = opts or {}
   local calls, refused, failed, timers, printed = {}, {}, {}, {}, {}
@@ -16,7 +17,7 @@ local function start(opts)
   local results = {
     ['hub.register'] = {generation = '1', limits = {inline_max = 60000, part_bytes = 30000, max_total = 1000000}},
     ['hub.sql.begin'] = {tx = 'tx-1'},
-    ['hub.sql.query'] = {columns = {'user_version'}, rows = {{1}}},
+    ['hub.sql.query'] = {columns = {'user_version'}, rows = {{opts.version or 2}}},
   }
   local fake = {
     args = {hub_client_id = 'client:hub', instance_id = 'profiles-1', main = plugin_dir .. '/profiles.lua'},
@@ -106,3 +107,14 @@ for _, name in ipairs({'begin', 'delete', 'commit'}) do
     expect(#failed > 0, log).to_be(true)
   end)
 end
+
+-- The schema is one base step at version 2. The SDK runs a base only on a new database, so a
+-- database at version 1 stops the plugin start: delete that database.
+test('a version-1 database stops the plugin start, and the log says why', function()
+  local calls, refused, printed = start({version = 1})
+  local log = table.concat(printed, '\n')
+  expect(refused, log).to_equal({})
+  expect(log).to_match('the start of profiles failed: The database has schema 1; this plugin starts at base 2')
+  expect(log).to_match('os.exit 1')
+  expect(first(calls, 'hub.sql.exec', '^DELETE FROM drafts'), log).to_be(nil)
+end)

@@ -161,18 +161,13 @@ test('a draft whose form never ended expires after a day, when the plugin starts
   expect(F.draft('fresh-view')).to_be_truthy()
 end)
 
--- The version-1 schema, as release 4.1 created it, and the version-2 schema after step 2.
-local version1 = {
-  {type = 'table', name = 'drafts', sql = 'CREATE TABLE drafts (view_id TEXT PRIMARY KEY, at INTEGER NOT NULL, dir TEXT, dir_source TEXT, ' ..
+-- The version-2 schema: the base step makes it.
+local version2 = {
+  {type = 'table', name = 'drafts', sql = 'CREATE TABLE drafts (view_id TEXT PRIMARY KEY, at INTEGER NOT NULL, dir TEXT, ' ..
     'dir_rev INTEGER NOT NULL DEFAULT 0, error TEXT, dismissed TEXT, saved_values TEXT, pending_key TEXT, pending_profile TEXT, pending_spawn_id TEXT)'},
   {type = 'index', name = 'drafts_at', sql = 'CREATE INDEX drafts_at ON drafts (at)'},
   {type = 'table', name = 'starts', sql = 'CREATE TABLE starts (op_key TEXT PRIMARY KEY, view_id TEXT NOT NULL, at INTEGER NOT NULL, request TEXT NOT NULL, saved_values TEXT)'},
   {type = 'index', name = 'starts_at', sql = 'CREATE INDEX starts_at ON starts (at)'},
-}
-local version2 = {
-  {type = 'table', name = 'drafts', sql = 'CREATE TABLE drafts (view_id TEXT PRIMARY KEY, at INTEGER NOT NULL, dir TEXT, ' ..
-    'dir_rev INTEGER NOT NULL DEFAULT 0, error TEXT, dismissed TEXT, saved_values TEXT, pending_key TEXT, pending_profile TEXT, pending_spawn_id TEXT)'},
-  version1[2], version1[3], version1[4],
 }
 local function schema()
   local list = {}
@@ -182,23 +177,21 @@ local function schema()
   return list
 end
 
-test('a fresh database has the version-2 schema; a version-1 database upgrades and keeps its rows', function()
+test('a fresh database has the version-2 schema; a version-2 database keeps its rows', function()
   expect(sql('PRAGMA user_version')[1].user_version).to_be(2)
   expect(schema()).to_equal(version2)
-  -- A version-1 database with a draft and a start, as the 4.1 plugin left it.
-  for _, statement in ipairs({'DROP TABLE drafts', version1[1].sql, version1[2].sql, 'PRAGMA user_version = 1'}) do sql_write(statement) end
-  sql_write('INSERT INTO drafts (view_id, at, dir, dir_source, dir_rev, error, saved_values, pending_key, pending_profile, pending_spawn_id) ' ..
-    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', {'v1-view', os.time(), F.wt, 'worktree', 2, 'it failed', '{"title":"Mine"}', 'v1-key', 'logtail', 'spawn-1'})
-  sql_write('INSERT INTO starts (op_key, view_id, at, request, saved_values) VALUES (?, ?, ?, ?, ?)', {'v1-key', 'v1-view', os.time(), '{"profile":"logtail"}', '{"title":"Mine"}'})
+  sql_write('INSERT INTO drafts (view_id, at, dir, dir_rev, error, saved_values, pending_key, pending_profile, pending_spawn_id) ' ..
+    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', {'v2-view', os.time(), F.wt, 2, 'it failed', '{"title":"Mine"}', 'v2-key', 'logtail', 'spawn-1'})
+  sql_write('INSERT INTO starts (op_key, view_id, at, request, saved_values) VALUES (?, ?, ?, ?, ?)', {'v2-key', 'v2-view', os.time(), '{"profile":"logtail"}', '{"title":"Mine"}'})
   hub:restart()
-  -- A form opens again: the plugin runs, and its migrations ran after it registered.
+  -- A form opens again: the plugin started on the version-2 database.
   F.form(F.source(), 'start_accessory')
   expect(sql('PRAGMA user_version')[1].user_version).to_be(2)
   expect(schema()).to_equal(version2)
-  local d = F.draft('v1-view')
+  local d = F.draft('v2-view')
   expect({d.dir, d.dir_rev, d.error, d.saved_values, d.pending_key, d.pending_profile, d.pending_spawn_id})
-    .to_equal({F.wt, 2, 'it failed', '{"title":"Mine"}', 'v1-key', 'logtail', 'spawn-1'})
-  local start = sql('SELECT request, saved_values FROM starts WHERE op_key = ?', {'v1-key'})[1]
+    .to_equal({F.wt, 2, 'it failed', '{"title":"Mine"}', 'v2-key', 'logtail', 'spawn-1'})
+  local start = sql('SELECT request, saved_values FROM starts WHERE op_key = ?', {'v2-key'})[1]
   expect({start.request, start.saved_values}).to_equal({'{"profile":"logtail"}', '{"title":"Mine"}'})
 end)
 

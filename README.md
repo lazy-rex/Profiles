@@ -43,13 +43,13 @@ cd ../../Profiles && lazyrex-hub test
 - contract.lua: the plugin client and the agent face.
 - start.lua: each start flow as the user (the form) and as an agent (hub.spawn); admission,
   replay, conflicts and stop.
-- form.lua: the form's tree, its draft, the Directory field's text, draft expiry and the schema upgrade.
+- form.lua: the form's tree, its draft, the Directory field's text, draft expiry, the schema and its rows over a restart.
 - pending.lua: pending and failed starts (the hub's spawn-create faults), and a lost hub.spawn
   reply that the hub retries with the same key; Dismiss pending start.
 - restart.lua: a pending start across a hub stop and a crash.
 - startup.lua: the start order in a sandbox (the real SDK, a fake rex): the startup expiry runs
   after the registration, also when the plugin timer runs first; a failed expiry is logged, and
-  the plugin start completes.
+  the plugin start completes; a version-1 database stops the start.
 - errors.lua: a hub refusal ends the operation. A missing directory fails at once: the profile's own
   (form and hub.spawn), a shown directory removed before Start, and `~` text (form).
 - directories.lua: the directory helper: the decoder of an OSC 7 report, and Git worktrees.
