@@ -48,7 +48,8 @@ cd ../../Profiles && lazyrex-hub test
   reply that the hub retries with the same key; Dismiss pending start.
 - restart.lua: a pending start across a hub stop and a crash.
 - startup.lua: the start order in a sandbox (the real SDK, a fake rex): the startup expiry runs
-  after the registration, also when the plugin timer runs first.
+  after the registration, also when the plugin timer runs first; a failed expiry is logged, and
+  the plugin start completes.
 - errors.lua: a hub refusal ends the operation. A missing directory fails at once: the profile's own
   (form and hub.spawn), a shown directory removed before Start, and `~` text (form).
 - directories.lua: the directory helper: the decoder of an OSC 7 report, and Git worktrees.
