@@ -28,9 +28,10 @@ return function(H)
   F.run({'git', '-C', F.repo, '-c', 'user.name=Lab', '-c', 'user.email=lab@example.invalid', 'commit', '-q', '--allow-empty', '-m', 'Fixture'})
   F.run({'git', '-C', F.repo, 'worktree', 'add', '-q', '-b', 'feature', F.wt})
 
-  -- Each started profile appends "<kind>|<LAZYREX_AGENT>|<task>|<physical cwd>" to F.out.
+  -- Each started profile appends "<kind>|<REX_BLOCK>|<task>|<physical cwd>" to F.out: REX_BLOCK is the
+  -- pane's own block ID (Rex sets it). The hub sets no agent ID in a pane.
   F.out = F.root .. '/out.log'
-  local record = 'printf "%s|%s|%s|%s\\n" "$1" "$LAZYREX_AGENT" "$2" "$(pwd -P)" >> "$0"; exec sleep 100000'
+  local record = 'printf "%s|%s|%s|%s\\n" "$1" "$REX_BLOCK" "$2" "$(pwd -P)" >> "$0"; exec sleep 100000'
   F.profiles = {profiles = {
     {id = 'fake_agent', name = 'Fake Agent', kind = 'agent', cwd = F.repo,
       command = {'/bin/sh', '-c', record, F.out, 'agent', '${task}'}, args = {{name = 'task', label = 'Task', default = 'alpha default'}}},
@@ -46,16 +47,18 @@ return function(H)
     if not f then return {} end
     local list = {}
     for line in f:lines() do
-      local kind, agent, task, cwd = line:match('^([^|]*)|([^|]*)|([^|]*)|(.*)$')
-      list[#list + 1] = {kind = kind, agent = agent, task = task, cwd = cwd}
+      local kind, block, task, cwd = line:match('^([^|]*)|([^|]*)|([^|]*)|(.*)$')
+      list[#list + 1] = {kind = kind, block = block, task = task, cwd = cwd}
     end
     f:close()
     return list
   end
-  -- record waits for the record line of an agent spawn (by its agent ID).
-  function F.record(agent_id)
-    return H.wait('the record of ' .. agent_id, function()
-      for _, r in ipairs(F.lines()) do if r.agent == agent_id then return r end end
+  -- record waits for the record line of a worker (by the block ID of its one labeled pane).
+  function F.record(w)
+    return H.wait('the record of ' .. w.spawn_id, function()
+      local blocks = F.spawn_blocks(w.session_id, w.spawn_id)
+      if #blocks ~= 1 then return nil end
+      for _, r in ipairs(F.lines()) do if r.block == blocks[1].block_id then return r end end
       return nil
     end, 15)
   end

@@ -139,10 +139,10 @@ test('a worktree choice and the profile default: the form sends the directory th
   end
   expect(F.spawn_blocks(src.session, ui.spawn_id)[1].window_id).not_to_be(F.spawn_blocks(src.session, tool.spawn_id)[1].window_id)
   expect({ui.profile, ui.cwd, ui.session_id}).to_equal({tool.profile, tool.cwd, tool.session_id})
-  expect(F.record(ui.agent_id).task).to_be('lab1')
-  expect(F.record(tool.agent_id).task).to_be('lab1')
-  expect(F.record(ui.agent_id).cwd).to_be(F.wt)
-  expect(F.record(tool.agent_id).cwd).to_be(F.wt)
+  expect(F.record(ui).task).to_be('lab1')
+  expect(F.record(tool).task).to_be('lab1')
+  expect(F.record(ui).cwd).to_be(F.wt)
+  expect(F.record(tool).cwd).to_be(F.wt)
 
   -- The profile default: an empty Directory field and no cwd; an empty Task and no args.
   v, tree = F.form(src, 'start_agent')
@@ -157,8 +157,8 @@ test('a worktree choice and the profile default: the form sends the directory th
   alice:call('hub.spawn', {profile = 'fake_agent', placement = {session = src.session}, key = 'default-1'})
   tool = F.new_worker(alice, before)
   expect({ui.cwd, tool.cwd}).to_equal({F.repo, F.repo})
-  expect(F.record(ui.agent_id).task).to_be('alpha default')
-  expect(F.record(tool.agent_id).task).to_be('alpha default')
+  expect(F.record(ui).task).to_be('alpha default')
+  expect(F.record(tool).task).to_be('alpha default')
 end)
 
 test('directory text: the form decodes editor text; an agent sends the raw absolute path', function()
@@ -196,12 +196,12 @@ test('directory text: the form decodes editor text; an agent sends the raw absol
   expect(F.ids(alice)).to_equal(before)
 end)
 
-test('admission: only a joined agent or the user starts a profile; focus is the user\'s', function()
+test('admission: only a reported agent or the user starts a profile; focus is the user\'s', function()
   local src = F.source()
   local stranger = agent('stranger', {report = false})
-  expect_error(function() stranger:call('hub.spawn', {profile = 'logtail', key = 'adm-1'}) end, 'not a joined agent')
+  expect_error(function() stranger:call('hub.spawn', {profile = 'logtail', key = 'adm-1'}) end, 'not a reported conversation')
   -- The runner is outside every pane.
-  expect_error(function() H.perform(H.resolve('lazyrex'), 'hub.spawn', {profile = 'logtail', key = 'adm-2'}) end, 'not a joined agent')
+  expect_error(function() H.perform(H.resolve('lazyrex'), 'hub.spawn', {profile = 'logtail', key = 'adm-2'}) end, 'not a reported conversation')
   expect_error(function() alice:call('hub.spawn', {profile = 'logtail', key = 'adm-3', ['for'] = 'user'}) end, 'only a registered plugin')
   expect_error(function() alice:call('hub.spawn', {profile = 'logtail', key = 'adm-4',
     placement = {session = src.session, focus = {source_window_id = src.window}}}) end, 'focus')
@@ -286,9 +286,9 @@ test('stop: any agent stops any worker; a repeated stop is safe; a pending start
   for _, who in ipairs({alice, bob}) do
     expect_error(function() who:call('hub.stop', {spawn_id = pending.spawn_id}) end, 'cannot stop it')
   end
-  -- Caller admission stays: a pane that is not a joined agent cannot stop a worker.
+  -- Caller admission stays: a pane with no reported conversation cannot stop a worker.
   local stranger = agent('stranger', {report = false})
   local target = alice:call('hub.spawn', {profile = 'logtail', placement = {session = src.session}, key = 'stop-e'})
-  expect_error(function() stranger:call('hub.stop', {spawn_id = target.spawn_id}) end, 'not a joined agent')
+  expect_error(function() stranger:call('hub.stop', {spawn_id = target.spawn_id}) end, 'not a reported conversation')
   expect(F.worker(alice, target.spawn_id)).to_be_truthy()
 end)
