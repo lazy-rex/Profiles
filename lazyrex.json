@@ -3,10 +3,6 @@
  "main": "profiles.lua",
  "sdk": "0",
  "test": {
-  "agents": [
-   {"id": "alice", "name": "Alice"},
-   {"id": "bob", "name": "Bob"}
-  ],
   "profiles": "tests/profiles.json"
  }
 }

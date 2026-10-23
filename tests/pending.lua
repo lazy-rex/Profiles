@@ -318,7 +318,7 @@ test('hub.spawn as an agent: pending, replay and session gone; a refused create 
   expect(opened.spawn_id).to_be(j.spawn_id)
   expect(F.spawn_blocks(s3, j.spawn_id)).to_have_length(1)
   local jw = F.worker(alice, j.spawn_id)
-  expect({jw.parent, jw.cwd}).to_equal({'alice', F.sub})
+  expect({jw.parent, jw.cwd}).to_equal({alice.id, F.sub})
 
   -- refuse: the spawn fails at once.
   fault({point = 'spawn-create', mode = 'refuse', op = 'agent-refuse'})

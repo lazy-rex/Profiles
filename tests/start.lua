@@ -40,7 +40,7 @@ test('a new tab: the form and hub.spawn start the same worker in the source sess
   local r = alice:call('hub.spawn', {profile = 'logtail', cwd = F.sub, placement = {session = src.session}, key = 'tab-1'})
   expect(r.status).to_be('open')
   local tool = F.new_worker(alice, before)
-  expect(tool.parent).to_be('alice')
+  expect(tool.parent).to_be(alice.id)
   expect(F.same(tool)).to_equal(F.same(ui))
   expect(F.same(ui)).to_equal({profile = 'logtail', cwd = F.sub, session_id = src.session, title = 'Log tail'})
   -- placement.focus: the user's new tab is active and its pane has focus; an agent's tab is not.
@@ -198,7 +198,7 @@ end)
 
 test('admission: only a joined agent or the user starts a profile; focus is the user\'s', function()
   local src = F.source()
-  local stranger = agent('stranger', {join = false})
+  local stranger = agent('stranger', {report = false})
   expect_error(function() stranger:call('hub.spawn', {profile = 'logtail', key = 'adm-1'}) end, 'not a joined agent')
   -- The runner is outside every pane.
   expect_error(function() H.perform(H.resolve('lazyrex'), 'hub.spawn', {profile = 'logtail', key = 'adm-2'}) end, 'not a joined agent')
@@ -231,7 +231,7 @@ test('replay and conflicts: a key belongs to its caller; a changed request is re
   -- The same key from bob is bob's own request.
   local theirs = bob:call('hub.spawn', request)
   expect(theirs.spawn_id).not_to_be(first.spawn_id)
-  expect(F.worker(alice, theirs.spawn_id).parent).to_be('bob')
+  expect(F.worker(alice, theirs.spawn_id).parent).to_be(bob.id)
 
   -- The form: a view operation whose start request is already saved (another invocation saved it
   -- first) sends the saved request, not the new values, the new source directory or the new
@@ -270,8 +270,8 @@ test('stop: any agent stops any worker; a repeated stop is safe; a pending start
   succeeded(v:action('start', 'start', {values = start_values({dir = F.field(tree, 'dir').value, profile = 'fake_agent'})}))
   local users_agent = F.new_worker(alice, before)
   -- The parent still names who started each worker; it does not limit stop.
-  local cases = {{own_agent.spawn_id, 'alice'}, {own_acc.spawn_id, 'alice'}, {bobs_agent.spawn_id, 'bob'},
-    {bobs_acc.spawn_id, 'bob'}, {users_acc.spawn_id, 'user'}, {users_agent.spawn_id, 'user'}}
+  local cases = {{own_agent.spawn_id, alice.id}, {own_acc.spawn_id, alice.id}, {bobs_agent.spawn_id, bob.id},
+    {bobs_acc.spawn_id, bob.id}, {users_acc.spawn_id, 'user'}, {users_agent.spawn_id, 'user'}}
   for _, c in ipairs(cases) do
     expect(F.worker(alice, c[1]).parent, c[1]).to_be(c[2])
     alice:call('hub.stop', {spawn_id = c[1]})
@@ -287,7 +287,7 @@ test('stop: any agent stops any worker; a repeated stop is safe; a pending start
     expect_error(function() who:call('hub.stop', {spawn_id = pending.spawn_id}) end, 'cannot stop it')
   end
   -- Caller admission stays: a pane that is not a joined agent cannot stop a worker.
-  local stranger = agent('stranger', {join = false})
+  local stranger = agent('stranger', {report = false})
   local target = alice:call('hub.spawn', {profile = 'logtail', placement = {session = src.session}, key = 'stop-e'})
   expect_error(function() stranger:call('hub.stop', {spawn_id = target.spawn_id}) end, 'not a joined agent')
   expect(F.worker(alice, target.spawn_id)).to_be_truthy()
