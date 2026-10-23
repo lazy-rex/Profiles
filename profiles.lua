@@ -354,6 +354,9 @@ app.command({id = 'start_accessory', title = 'Start Accessory…', description =
 -- again after each SQL commit. The plugin keeps no Lua state that a render shows. A worker change
 -- is not a commit: the listener renders a pending start's form again with its current state.
 app.on('hub.changed', function(args) if args.what == 'workers' then app.refresh() end end)
--- Drafts expire at start and each hour (a render only reads).
-app.after(0, expire_drafts)
+-- Drafts expire at start and each hour (a render only reads). The start expiry is an app.start
+-- function: the hub refuses hub.sql before the plugin registers, and an app.after(0) timer can run
+-- before the SDK registers the plugin (observed once in a lab: hub d1c13b5,
+-- Rex 0.0.1792158932-g88fd41).
+app.start(expire_drafts)
 app.every(3600, expire_drafts)
