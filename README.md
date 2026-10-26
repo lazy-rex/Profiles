@@ -27,10 +27,12 @@ The hub owns the profiles. The profiles file is described in the LazyRex hub doc
 ## The form
 
 - **Directory.** The form shows the source pane's directory. The hub reads that directory once,
-  when it opens the form. An empty field uses each profile's own directory. The app's directory
-  browser can fill the field.
+  when it opens the form. An empty field uses the directory that the form showed. Only when the
+  form shows no directory does an empty field use each profile's own directory. The app's
+  directory browser can fill the field.
 - **Directory choices.** When the directory is in a Git repository with more than one worktree, the
-  form lists each worktree. **Use each profile's own directory** clears the choice.
+  form lists each worktree. **Use each profile's own directory** clears the shown directory, so
+  each profile starts in its own directory.
 - **Profile.** The profiles of the command's kind.
 - **Args.** One field for each arg name that the profiles of this kind declare. An empty field is
   not sent, so the profile's default applies. The hub checks the required args.
@@ -68,7 +70,8 @@ The plugin keeps its data in its own SQL database (`hub.sql`):
 - `starts`: the `hub.spawn` request and the form values of each submit.
 
 The plugin removes rows that are older than one day, at its start and every hour. A start that a
-pending form names stays. A render of the form writes nothing.
+pending form names stays while the draft of that form stays. The draft also expires after one
+day, and then the plugin can remove the start. A render of the form writes nothing.
 
 ## Limits
 
